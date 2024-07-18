@@ -63,6 +63,7 @@ library(readxl)
 library(rlang)
 library(nortest)
 library(glue)
+library(reshape2)
 conflict_prefer("select", "dplyr")
 conflicts_prefer(dplyr::filter)  # Set conflict resolution preferences
 
@@ -256,19 +257,19 @@ calculate_statistics <- function(df) {
   ambulatory_notes <- sum(df$encountercontext == "Ambulatory")
   ed_notes <- sum(df$encountercontext == "Emergency Department")
   telephone_notes <- sum(df$encountercontext == "Telephone Encounter")
-  total_time_days <- sum(df$total.time) / (60 * 60 * 24)
-  mean_time_mins <- exp(mean(log(df$total.time / 60), na.rm = TRUE))
-  sd_time_mins <- exp(sd(log(df$total.time / 60), na.rm = TRUE))
-  median_time_mins <- median(df$total.time / 60)
-  max_time_mins <- max(df$total.time / 60)
-  quantile_25th_time_mins <- quantile(df$total.time / 60, probs = 0.25)
-  quantile_75th_time_mins <- quantile(df$total.time / 60, probs = 0.75)
+  total_time_days <- sum(df$resident.time) / (60 * 60 * 24)
+  mean_time_mins <- exp(mean(log(df$resident.time / 60), na.rm = TRUE))
+  sd_time_mins <- exp(sd(log(df$resident.time / 60), na.rm = TRUE))
+  median_time_mins <- median(df$resident.time / 60)
+  max_time_mins <- max(df$resident.time / 60)
+  quantile_25th_time_mins <- quantile(df$resident.time / 60, probs = 0.25)
+  quantile_75th_time_mins <- quantile(df$resident.time / 60, probs = 0.75)
   weekend_time_days <- sum(df$weekend) / (60 * 60 * 24)
-  percentage_weekend <- sum(df$weekend) / sum(df$total.time) * 100
+  percentage_weekend <- sum(df$weekend) / sum(df$resident.time) * 100
   pm_time_days <- sum(df$pm) / (60 * 60 * 24)
-  percentage_pm <- sum(df$pm) / sum(df$total.time) * 100
+  percentage_pm <- sum(df$pm) / sum(df$resident.time) * 100
   after_hours_time_days <- sum(df$after.hours) / (60 * 60 * 24)
-  percentage_after_hours <- sum(df$after.hours) / sum(df$total.time) * 100
+  percentage_after_hours <- sum(df$after.hours) / sum(df$resident.time) * 100
   mean_note_size <- exp(mean(log(df$notesize), na.rm = TRUE))
   sd_note_size <- exp(sd(log(df$notesize), na.rm = TRUE))
   count_dictated <- sum(df$`%voice` > 0, na.rm = TRUE)
@@ -279,17 +280,17 @@ calculate_statistics <- function(df) {
   sd_copied <- sd(df$`%copied`, na.rm = TRUE)
 
   # Specific mean times calculations with exponential and log transformation
-  mean_hp <- ifelse(any(df$notetype == "H&P"), exp(mean(log(df$total.time[df$notetype == "H&P"] / 60), na.rm = TRUE)), NA)
-  mean_CN <- ifelse(any(df$notetype == "Clinic Note"), exp(mean(log(df$total.time[df$notetype == "Clinic Note"] / 60), na.rm = TRUE)), NA)
-  mean_DS <- ifelse(any(df$notetype == "Discharge Summary"), exp(mean(log(df$total.time[df$notetype == "Discharge Summary"] / 60), na.rm = TRUE)), NA)
-  mean_Cs <- ifelse(any(df$notetype == "Consults"), exp(mean(log(df$total.time[df$notetype == "Consults"] / 60), na.rm = TRUE)), NA)
-  mean_PN <- ifelse(any(df$notetype == "Progress Notes"), exp(mean(log(df$total.time[df$notetype == "Progress Notes"] / 60), na.rm = TRUE)), NA)
-  mean_TE <- ifelse(any(df$notetype == "Telephone Encounter"), exp(mean(log(df$total.time[df$notetype == "Telephone Encounter"] / 60), na.rm = TRUE)), NA)
-  mean_ED <- ifelse(any(df$notetype == "Emergency Department"), exp(mean(log(df$total.time[df$notetype == "Emergency Department"] / 60), na.rm = TRUE)), NA)
-  mean_P <- ifelse(any(df$notetype == "Procedures"), exp(mean(log(df$total.time[df$notetype == "Procedures"] / 60), na.rm = TRUE)), NA)
+  mean_hp <- ifelse(any(df$notetype == "H&P"), exp(mean(log(df$resident.time[df$notetype == "H&P"] / 60), na.rm = TRUE)), NA)
+  mean_CN <- ifelse(any(df$notetype == "Clinic Note"), exp(mean(log(df$resident.time[df$notetype == "Clinic Note"] / 60), na.rm = TRUE)), NA)
+  mean_DS <- ifelse(any(df$notetype == "Discharge Summary"), exp(mean(log(df$resident.time[df$notetype == "Discharge Summary"] / 60), na.rm = TRUE)), NA)
+  mean_Cs <- ifelse(any(df$notetype == "Consults"), exp(mean(log(df$resident.time[df$notetype == "Consults"] / 60), na.rm = TRUE)), NA)
+  mean_PN <- ifelse(any(df$notetype == "Progress Notes"), exp(mean(log(df$resident.time[df$notetype == "Progress Notes"] / 60), na.rm = TRUE)), NA)
+  mean_TE <- ifelse(any(df$notetype == "Telephone Encounter"), exp(mean(log(df$resident.time[df$notetype == "Telephone Encounter"] / 60), na.rm = TRUE)), NA)
+  mean_ED <- ifelse(any(df$notetype == "Emergency Department"), exp(mean(log(df$resident.time[df$notetype == "Emergency Department"] / 60), na.rm = TRUE)), NA)
+  mean_P <- ifelse(any(df$notetype == "Procedures"), exp(mean(log(df$resident.time[df$notetype == "Procedures"] / 60), na.rm = TRUE)), NA)
 
   smartphrase_mean <- mean(lengths(gregexpr("\\[", df$smartphraseids)), na.rm = TRUE)
-  time_to_complete_mean <- exp(mean(log(df$starttostop), na.rm = TRUE))
+  time_to_complete_mean <- exp(mean(log(df$starttostop), na.rm = TRUE)) / 60 * 24
   time_to_complete_sd <- exp(sd(log(df$starttostop), na.rm = TRUE))
   number_copied_forward <- sum(df$iteration > 0, na.rm = TRUE)
   mean_iteration <- mean(df$iteration, na.rm = TRUE)
@@ -297,47 +298,58 @@ calculate_statistics <- function(df) {
 
   # Create a dataframe of the computed values
   data.frame(
-    AllNotes = all_notes,
-    InpatientNotes = inpatient_notes,
-    AmbulatoryNotes = ambulatory_notes,
+    'All.Notes' = all_notes,
+    'Inpatient' = inpatient_notes,
+    'Ambulatory' = ambulatory_notes,
     EDNotes = ed_notes,
     TelephoneNotes = telephone_notes,
     TotalTimeDays = total_time_days,
-    MeanTimeMins = mean_time_mins,
+    Overall = mean_time_mins,
     SDTimeMins = sd_time_mins,
     MedianTimeMins = median_time_mins,
     MaxTimeMins = max_time_mins,
     IQR25th = quantile_25th_time_mins,
     IQR75th = quantile_75th_time_mins,
     WeekendTimeDays = weekend_time_days,
-    PercentageWeekend = percentage_weekend,
+    Weekend = percentage_weekend,
     PMTimeDays = pm_time_days,
-    PercentagePM = percentage_pm,
+    'Inpatient.PM' = percentage_pm,
     AfterHoursTimeDays = after_hours_time_days,
-    PercentageAfterHours = percentage_after_hours,
-    MeanNoteSize = mean_note_size,
+    'Ambulatory.After_Hours' = percentage_after_hours,
+    'Note.Size' = mean_note_size,
     SDNoteSize = sd_note_size,
     CountDictated = count_dictated,
-    MeanDictation = mean_dictation,
+    'Percent.Dictated' = mean_dictation,
     SDDictation = sd_dictation,
     CountCopied = count_copied,
-    MeanCopied = mean_copied,
+    'Percent.Copied' = mean_copied,
     SDCopied = sd_copied,
     SmartphraseMean = smartphrase_mean,
-    TimeToCompleteMean = time_to_complete_mean,
+    'Days.to.Sign' = time_to_complete_mean,
     TimeToCompleteSD = time_to_complete_sd,
     NumberCopiedForward = number_copied_forward,
     MeanIteration = mean_iteration,
     SDIteration = sd_iteration,
-    HPMean = mean_hp,
-    ClinicNoteMean = mean_CN,
-    DischargeSummaryMean = mean_DS, 
-    ConsultsMean = mean_Cs, 
-    ProgressNotesMean = mean_PN, 
-    TelephoneEncounterMean = mean_TE, 
-    EmergencyDeptMean = mean_ED, 
-    ProceduresMean = mean_P
+    'HP' = mean_hp,
+    'Clinic' = mean_CN,
+    'Discharge' = mean_DS, 
+    'Consult' = mean_Cs, 
+    'Progress' = mean_PN, 
+    'Telephone' = mean_TE, 
+    'ED' = mean_ED, 
+    'Procedure' = mean_P
   )
+}
+
+# Function to melt and create plots for specific variable groups without legend
+create_melted_plot <- function(data, columns, title, x_label, y_label) {
+  melted_data <- melt(data[, c("PGY", columns)], id.vars = "PGY")
+  ggplot(melted_data, aes(x = variable, y = value, color = PGY)) +
+    geom_point(position = position_jitter(width = 0.2, height = 0)) +
+    labs(title = title, x = x_label, y = y_label) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
 }
 
 ```
@@ -972,7 +984,7 @@ true.service <- read_xlsx("C:\\Users\\yahya\\OneDrive\\Research\\residency.notes
 ```  
 
 
-```{r, individual data, echo=false}
+```{r, per resident and figure 1, echo=false}
 
 per.resident <- readRDS("per.resident.rds")
 
@@ -1001,13 +1013,68 @@ per.pgy1 <- do.call(rbind, lapply(listpgy1, calculate_statistics))
 per.pgy2 <- do.call(rbind, lapply(listpgy2, calculate_statistics))
 per.pgy3 <- do.call(rbind, lapply(listpgy3, calculate_statistics))
 
+# Add a PGY level indicator to each dataframe
+per.pgy1$PGY <- 'PGY1'
+per.pgy2$PGY <- 'PGY2'
+per.pgy3$PGY <- 'PGY3'
 
-library(GGally)
-ggpairs(per.pgy1, columns = c("AllNotes", "MeanTimeMins", "PercentageWeekend", "PercentagePM"))
+# Combine the dataframes into one
+combined_df <- bind_rows(per.pgy1, per.pgy2, per.pgy3)
+
+# Create plots for Time-related, Count-related, and Shift-related variables
+time_plot <- create_melted_plot(combined_df, c("Overall", "HP", "Clinic", "Discharge", 
+                                               "Consult", "Progress", "Telephone", 
+                                               "ED", "Procedure"), 
+                                "Average Time per Note Type", "Type of Note", "Time in Minutes")
+
+count_plot <- create_melted_plot(combined_df, c("All.Notes", "Inpatient", "Ambulatory"), 
+                                 "Counts of Notes by Context", "Context of Note", "Count of Notes")
+
+shift_plot <- create_melted_plot(combined_df, c("Weekend", "Inpatient.PM", "Ambulatory.After_Hours"), 
+                                 "Percentage of Notes During Specific Shifts", "Shift Type", "Percentage (%)")
+
+# Select relevant columns for correlation analysis and handle missing values
+correlation_data <- na.omit(combined_df[, c("PGY", "Overall", "Percent.Copied", "Percent.Dictated", 
+                                            "Days.to.Sign", "Note.Size")])
+
+# Melt data for correlation plots
+correlation_data_melted <- melt(correlation_data, id.vars = c("PGY", "Overall"), variable.name = "Variable", value.name = "Value")
+
+# Create correlation plot with smaller font and points
+correlation_plot <- ggplot(correlation_data_melted, aes(x = Overall, y = Value, color = PGY)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  geom_smooth(aes(group = PGY), method = "lm", se = FALSE, fullrange = TRUE, linetype = "dashed") +
+  facet_wrap(~ Variable, scales = "free_y") +
+  labs(title = "Correlation between Mean Time and Various Metrics", x = "Mean Time in Minutes", y = "Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        axis.text.y = element_text(size = 8),
+        strip.text = element_text(size = 10, face = "bold"),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 10))
+
+# Arrange the plots in a 2x2 matrix and save the combined plot
+combined_plot <- grid.arrange(time_plot, count_plot, shift_plot, correlation_plot, ncol = 2, nrow = 2)
+ggsave("figure.1.individual.variability.png", plot = combined_plot, width = 14, height = 12)
 
 
 ```
 
+
+```{r, per class and figure 2, echo=FALSE}
+
+all.data <- readRDS("all_data.rds")
+  class <- all.data %>%
+    filter(pgy != "NA")
+
+
+
+
+
+
+
+```
 
 ```{r, table 1, echo=FALSE}
 
