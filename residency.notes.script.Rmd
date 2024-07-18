@@ -1,0 +1,972 @@
+---
+title: "residency.notes"
+author: "Yahya Almodallal"
+date: "2024-06-23"
+output: html_document
+---
+
+```{r setup and libraries, echo=FALSE, include=FALSE}
+
+#Clean environment and free memory
+rm(list = ls())
+gc()
+
+setwd("C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Script")
+
+save_path <- "C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Script\\Script cache and figures\\Cache"
+
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 8,
+  cache = TRUE,
+  cache.path = save_path,
+  fig.path = save_path
+)
+
+#Set number of digits to display
+options(digits = 5, scipen = 999)
+
+#Packages and Libraries
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(readr)
+library(conflicted)
+library(dplyr)
+library(htmltools)
+library(skimr)
+library(janitor)
+library(gt)
+library(tidyr)
+library(stringdist)
+library(purrr)
+library(report)
+library(grid)
+library(stringr)
+library(gridExtra)
+library(MASS)
+library(knitr)
+library(tools)
+library(kableExtra)
+library(DT)
+library(broom)
+library(htmlwidgets)
+library(webshot)
+library(extrafont)
+library(ragg)
+library(plotly)
+library(pagedown)
+library(readxl)
+library(rlang)
+library(nortest)
+conflict_prefer("select", "dplyr")
+conflicts_prefer(dplyr::filter)  # Set conflict resolution preferences
+
+
+
+```
+
+
+```{r, functions, echo=FALSE, include=FALSE}
+
+#summarize dataframes
+sum_df <- function(df) {
+  # Create an empty list to store summaries
+  summary_list <- list()
+  
+  # 1. Number of rows
+  summary_list$Number_of_Rows <- nrow(df)
+  
+  # 2. Names of columns
+  summary_list$Column_Names <- colnames(df)
+  
+  # 3. Summaries for character variables with fewer than 100 unique values
+  char_vars <- df[, sapply(df, is.character)]
+  if (!is.null(char_vars)) {
+    summary_list$Character_Variables <- lapply(char_vars, function(x) {
+      if (length(unique(x)) < 100) {
+        return(table(x))
+      } else {
+        return(NA)  # Or return(NULL) if you prefer not to store anything for columns with >= 100 unique values
+      }
+    })
+  }
+  
+  
+  # 4. Summaries for numerical variables
+  num_vars <- df[, sapply(df, is.numeric)]
+  if (!is.null(num_vars)) {
+    summary_list$Numerical_Variables <- lapply(num_vars, function(x) {
+      list(
+        Median = median(x, na.rm = TRUE),
+        IQR = IQR(x, na.rm = TRUE),
+        Min = min(x, na.rm = TRUE),
+        Max = max(x, na.rm = TRUE)
+      )
+    })
+  }
+  
+  # 5. First and last dates for POSIXct variables
+  date_vars <- df[, sapply(df, function(x) inherits(x, "POSIXct"))]
+  if (!is.null(date_vars)) {
+    summary_list$Date_Variables <- lapply(date_vars, function(x) {
+      list(
+        First_Date = min(x, na.rm = TRUE),
+        Last_Date = max(x, na.rm = TRUE)
+      )
+    })
+  }
+  
+  return(summary_list)
+}
+
+
+# Determine the 'Shift'
+get_shift <- function(encounter, editstart) {
+  hour <- hour(editstart)
+  if (encounter %in% c("Ambulatory", "HOV", "Telephone Encounter")) {
+    if (hour >= 7 & hour < 17) {
+      return("Work-hours")
+    } else {
+      return("After work-hours")
+    }
+  } else if (encounter == "Emergency Department") {
+    return(NA)
+  } else if (encounter %in% "Inpatient") {
+    if (hour >= 7 & hour < 18) {
+      return("AM shift")
+    } else {
+      return("PM shift")
+    }
+  } else {
+    return(NA)
+  }
+}
+
+# Function to create and save plots for character variables in EDA
+create_and_save_plots <- function(data, columns, file_name_prefix, ncol = 3) {
+  plots <- lapply(columns, function(column) {
+    ggplot(data, aes(x = !!sym(column))) + 
+      geom_bar() +
+      geom_text(stat='count', aes(label=..count..), vjust=-0.5) +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  })
+  
+  combined_plot <- do.call(grid.arrange, c(plots, ncol = ncol))
+  
+  # Save the combined figure
+  ggsave(paste0(file_name_prefix, "_combined_plot.png"), plot = combined_plot, width = 20, height = 15)
+}
+
+# Function to create and save plots for numeric variables in EDA
+create_and_save_numeric_plots <- function(data, file_name_prefix, ncol = 3) {
+  numeric_cols <- data %>%
+    select_if(is.numeric) %>%
+    colnames()
+  
+  plots <- lapply(numeric_cols, function(column) {
+    hist_plot <- ggplot(data, aes(x = !!sym(column))) + 
+      geom_histogram(bins = 60) +
+      labs(title = column)
+    
+    list(hist_plot)
+  })
+  
+  plots <- unlist(plots, recursive = FALSE)
+  
+  # Split plots into groups of 6 and save each group
+  plot_groups <- split(plots, ceiling(seq_along(plots)/6))
+  
+  for (i in seq_along(plot_groups)) {
+    combined_plot <- do.call(grid.arrange, c(plot_groups[[i]], ncol = ncol))
+    ggsave(paste0(file_name_prefix, "_combined_plot", i, ".png"), plot = combined_plot, width = 20, height = 15)
+  }
+}
+
+
+# Function to apply transformations, sample means, create plots, and perform tests
+analyze_transformations <- function(data, columns, seed = 12) {
+  test_results <- data.frame(
+    variable = character(),
+    transformation = character(),
+    ad_p_value = numeric(),
+    shapiro_p_value = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  transformations <- list(
+    original = function(x) x,
+    log = function(x) ifelse(x > 0, log(x), NA),
+    sqrt = function(x) ifelse(x >= 0, sqrt(x), NA),
+    cbrt = function(x) ifelse(x >= 0, x^(1/3), NA),
+    boxcox = function(x) {
+      x_positive <- x + 1
+      lambda <- boxcox(x_positive ~ 1, lambda = seq(-2, 2, by = 0.05))$x[which.max(boxcox(x_positive ~ 1, lambda = seq(-2, 2, by = 0.05))$y)]
+      (x_positive)^lambda
+    }
+  )
+  
+  for (column in columns) {
+    for (trans_name in names(transformations)) {
+      # Apply transformation
+      trans_data <- data %>% mutate(trans_col = transformations[[trans_name]](!!sym(column)))
+      
+      # Remove NA values from the transformed data
+      clean_data <- na.omit(trans_data$trans_col)
+      
+      if (length(clean_data) >= 500) {  # Ensure there are enough data points for sampling
+        set.seed(seed)  # for reproducibility
+        sample_means <- replicate(1000, mean(sample(clean_data, size = 500, replace = TRUE)))
+        
+        # Create histogram
+        hist(sample_means, breaks = 60, main = paste("Histogram of Sample Means -", column, trans_name))
+        
+        # Create QQ plot
+        qqnorm(sample_means, main = paste("QQ Plot of Sample Means -", column, trans_name))
+        qqline(sample_means, col = "red")
+        
+        # Perform tests
+        ad_test <- ad.test(sample_means)
+        shapiro_test <- shapiro.test(sample_means)
+        
+        # Store results
+        test_results <- rbind(test_results, data.frame(
+          variable = column,
+          transformation = trans_name,
+          ad_p_value = ad_test$p.value,
+          shapiro_p_value = shapiro_test$p.value
+        ))
+      } else {
+        message(paste("Not enough valid data points for", column, "with transformation", trans_name))
+      }
+    }
+  }
+  
+  return(test_results)
+}
+
+
+```
+
+
+```{r upload & combine, eval=FALSE, echo=FALSE, include=FALSE}
+
+# Specify file paths
+raw_files <- c(
+  "C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Raw files\\AllNotes124624_20240707_1002.xlsx",
+  "C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Raw files\\AllNotes721622_20240623_1717.xlsx",
+  "C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Raw files\\AllNotes722623_20240623_1715.xlsx",
+  "C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Raw files\\AllNotes7231223_20240623_1719.xlsx"
+)
+
+# Read each file and combine rows
+all_data_1 <- suppressWarnings(
+  lapply(raw_files, read_excel) %>%
+    bind_rows()
+)
+
+# Names of all residents over the last 3 years, per year. Names have changed to some extent overtime, the names in the above uploaded files will be adjusted to match the ones in this file
+resident.names <- read.csv("C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Edited files\\All Residents 21-24.csv")
+
+# Or if you want to convert them to a vector
+res_vector <- unlist(resident.names)
+
+# The true service of all attendings, inspired by earlier work and updated in 7/2024
+true.service <- read_xlsx("C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Edited files\\true.author.service.7.24.xlsx")
+
+# Filter rows where 'authortype' is 'attending'
+staffs <- true.service %>%
+  filter(authortype == "attending") %>%
+  pull(name)
+
+```
+
+
+```{r refine, eval=FALSE, echo=FALSE, include=FALSE}
+
+# Convert all column names to lowercase and remove spaces
+names(all_data_1) <- tolower(gsub("[ '?]", "", names(all_data_1)))
+
+# Refining: rename columns, column class, nnsy service, delete columns
+all_data_1 <- all_data_1 %>%
+  rename(
+    specialtyatnote = `specialty...19`,
+    specialtycurrent = `specialty...20`
+  ) %>%
+  mutate(
+    # Edit column class, remove % symbol
+    `%voice` = as.numeric(gsub("%", "", `%voice`)),
+    `%copied` = as.numeric(gsub("%", "", `%copied`)),
+    noteid = as.character(noteid),
+    # Recategorize 'authortype'
+    authortype = case_when(
+      authortype %in% c("(Other)", "Clerk", "Dietitian", "Medical Student", "Non-Privileged Provider", "Nurse-ARNP", "Nursing Assistant", "Pharmacist", "Physician-Fellow", "Dentist-Resident", "Medical Assistant", "Occupational Therapist", "PA Student", "Physical Therapist", "Speech Pathologist", "Student Nurse") ~ "other",
+      authortype %in% c("Anesthesiologist", "Physician-Associate", "Physician-Fellow Associate", "Physician-Staff", "Physician-Visit Assistant Prof", "Physician-Visit Associate", "Physician Assistant", "Registered Nurse", "Social Worker") ~ "attending",
+      authortype == "Physician-Resident" ~ "resident",
+      TRUE ~ authortype # Preserve original for undefined categories
+    )
+  ) %>%
+    # Set encountercontext for specific notetypes
+  mutate(encountercontext = case_when(
+    notetype %in% c("Clinic Note", "Clinical Letter") ~ "Ambulatory",
+    notetype %in% c("Discharge Summary", "H&P", "Interim Progress Note", "Progress Notes") ~ "Inpatient",
+    notetype %in% c("ED Provider Notes", "ED Notes") ~ "Emergency Department",
+    notetype %in% c("Telephone Encounter", "ED Notes") ~ "Telephone Encounter",
+    TRUE ~ encountercontext
+  )) %>%
+  mutate(authorsservice = case_when(
+    authorsservice %in% c("Pediatrics", "QuickCare") ~ "PED General",
+    authorsservice == "Psychiatry" ~ "PSY Child Psychiatry",
+    authorsservice == "MED Allergy/Immunology" ~ "PED Allergy/Immunology",
+    TRUE ~ authorsservice
+  )) %>%
+  mutate(notetype = case_when(
+    notetype %in% c("ED Provider Notes", "ED Notes") ~ "Emergency Department",
+    TRUE ~ notetype
+  )) %>%
+  # Change encountercontext values of "HOV"
+  mutate(encountercontext = if_else(encountercontext == "HOV", "Ambulatory", encountercontext)) %>%
+  # Set authorsservice for Emergency Department
+  mutate(authorsservice = if_else(encountercontext == "Emergency Department", "Emergency Department", authorsservice)) %>%
+  # Update encountercontext for specific services
+  mutate(encountercontext = case_when(
+    (encountercontext %in% c("Ambulatory", "Inpatient") & authorsservice == "Emergency Department") ~ "Emergency Department",
+    TRUE ~ encountercontext
+  ))%>%
+  # Remove unneeded columns
+  select(-noteactive, -`%***`)
+
+# summary.1: raw data after some refining
+summary.1 <- sum_df(all_data_1)
+
+# Identifying notes with equal number of authors and edit times, excluding notes with unequal numbers, and identifying notes with no time data
+  # available and equal edit times and author information
+  all_data_2 <- all_data_1 %>%
+    mutate(
+      authorcount = str_count(author, "\n") + 1,
+      timecount = str_count(`edittime(seconds)`, "\n") + 1,
+    ) %>%
+    filter(authorcount == timecount) %>%
+    select(-authorcount, -timecount)
+  summary.2 <- sum_df(all_data_2)
+  
+  # not equal number (too many edit instances)
+  not_equal <- all_data_1 %>%
+    mutate(
+      authorcount = str_count(author, "\n") + 1,
+      timecount = str_count(`edittime(seconds)`, "\n") + 1
+    ) %>%
+    filter(authorcount != timecount) %>%
+    select(-authorcount, -timecount)
+  summary.3 <- sum_df(not_equal)
+  
+  # not available edit time information
+  combined <- bind_rows(not_equal, all_data_2)
+    no_times <- anti_join(all_data_1, combined, by = "noteid")
+  summary.4 <- sum_df(no_times)
+  
+# The edit start and edit stop dates are not uniform, there were about 3000 values where the dates are shown as serial numbers, luckily these are easy to extract since each has a single editing instance
+  # Extract serial number dates and convert them back to actual dates, then calculate the time betwene the start and end of each note
+  filtered_data <- all_data_2 %>%
+    filter(grepl("^[0-9]+\\.?[0-9]*$", editstart), grepl("^[0-9]+\\.?[0-9]*$", editstop)) %>%
+    mutate(
+      editstart = as.POSIXct(as.Date(as.numeric(editstart), origin = "1899-12-30"), tz = "UTC"),
+      editstop = as.POSIXct(as.Date(as.numeric(editstop), origin = "1899-12-30"), tz = "UTC"),
+      starttostop = difftime(editstop, editstart, units = "hours"),
+      `edittime(seconds)` = as.numeric(`edittime(seconds)`)
+    )
+  
+  # Remaining rows, to calculate the time between the start and end of these notes; will need to divide the contents of each row, convert them to date/time, then calculate the difference
+    # Step 1: Filter out rows in all_data_2 that match rows in filtered_data
+    all_data_2_remaining <- all_data_2 %>%
+      anti_join(filtered_data, by = "noteid") %>%
+      mutate(
+      first_editstart = sapply(strsplit(as.character(editstart), "\r\n"), `[`, 1),
+      last_editstop = sapply(strsplit(as.character(editstop), "\r\n"), tail, 1),
+      first_editstart = as.POSIXct(first_editstart, format = "%m/%d/%Y %I:%M:%S %p", tz = "UTC"),
+      last_editstop = as.POSIXct(last_editstop, format = "%m/%d/%Y %I:%M:%S %p", tz = "UTC"),
+      starttostop = difftime(last_editstop, first_editstart, units = "hours")
+    ) %>%
+      select(-last_editstop, -first_editstart)
+  
+# Separate the editing instances into separate rows
+  all_data_3 <- all_data_2_remaining %>% separate_rows(editstart, editstop, author, 'edittime(seconds)', sep = "\r\n")
+    # Convert dates to proper format, then deal with NA values
+      all_data_3$dtofsvc <- as.POSIXct(all_data_3$dtofsvc, format="%m/%d/%Y %I:%M:%S %p")
+      all_data_3$filetime <- as.POSIXct(all_data_3$filetime, format="%m/%d/%Y %I:%M:%S %p")
+      all_data_3$editstart <- as.POSIXct(all_data_3$editstart, format="%m/%d/%Y %I:%M:%S %p")
+      all_data_3$editstop <- as.POSIXct(all_data_3$editstop, format="%m/%d/%Y %I:%M:%S %p")
+      all_data_3$`edittime(seconds)` <- as.numeric(all_data_3$`edittime(seconds)`)
+
+  # Now we can join the two dataframes, and double checks for NAs, zeros, or negative values
+  all_data_3 <- bind_rows(all_data_3, filtered_data)
+  
+  # Replace 0 or negative values with NA
+  all_data_3$starttostop <- ifelse(all_data_3$starttostop <= 0, NA, all_data_3$starttostop)
+  
+  # Check for NA values
+  na_count = sum(is.na(all_data_3$starttostop))
+  total_rows = nrow(all_data_3)
+  
+  # Print the results
+  print(paste("Number of NA values: ", na_count))
+      
+# Adding the day and shift columns
+  all_data_3 <- all_data_3 %>%
+   mutate(day = weekdays(editstart)) %>%
+   mutate(shift = mapply(get_shift, encountercontext, editstart))
+
+    # Calculate the number of NAs in editstart and shift columns
+    editstart_na_count <- sum(is.na(all_data_3$editstart))
+    shift_na_count <- sum(is.na(all_data_3$shift))
+    
+    # Count how many notes are from the Emergency Department
+    ed_notes_count <- sum(all_data_3$encountercontext == "Emergency Department")
+    
+    # Check that all NAs are for ED notes and the count of NAs matches the count of ED notes
+    if (editstart_na_count == 0 && shift_na_count == ed_notes_count) {
+        print("All dates are appropriate and only ED notes have no assigned shift")
+    } else {
+        print("There is a discrepancy in the data. Not all NAs are for ED notes or the counts do not match.")
+    }
+
+# Cleaning the author and note author columns and making sure every signing note author name is present as an author of the same note
+  
+  # Clean the Author column (remove the [########] from the end of each name)
+    all_data_3 <- all_data_3 %>%
+      mutate(
+        author = gsub("\\s\\[\\d+\\]", "", author)
+      )
+
+  # Convert author and note author columns to lower case
+    all_data_3 <- all_data_3 %>%
+      mutate(
+        noteauthor = tolower(noteauthor),
+        author = tolower(author)
+      )
+
+    # Remove spaces at the end of each value, and remove everything after the 2nd comma (individual's degree)
+      all_data_4 <- all_data_3 %>%
+        mutate(noteauthor = sapply(str_split(noteauthor, ", "), function(x) paste(x[1:min(length(x), 2)], collapse = ", ")),
+               noteauthor = if_else(str_sub(noteauthor, -1, -1) == " ", str_sub(noteauthor, 1, str_length(noteauthor) - 1), noteauthor),
+               author = if_else(str_sub(author, -1, -1) == " ", str_sub(author, 1, str_length(author) - 1), author))
+
+    # Filter all rows where a unique note's signing author is not present in the authors' column
+      filtered_data <- all_data_4 %>%
+        group_by(noteid) %>%
+        filter(!noteauthor %in% author) %>%
+        ungroup()
+
+    # Take these rows out of the main dataframe, clean them, then join them back into the main dataframe
+      unfiltered <- all_data_4 %>%
+        anti_join(filtered_data, by = colnames(all_data_4))
+      
+      nrow(filtered_data) + nrow(unfiltered) == nrow(all_data_4)
+
+      # Define the mapping of original values to new values
+        author_mapping <- c(
+          "bea..." = "beasley, gary s",
+          "colaizy, ..." = "colaizy, tarah t",
+          "dagle, jo..." = "dagle, john m",
+          "fontinel, amy l" = "stier, amy c",
+          "zhorne, derek j" = "weinstein, stuart l"
+        )
+        
+        # Apply the mapping to the 'author' column
+          filtered_data <- filtered_data %>%
+            mutate(author = case_when(
+              author %in% names(author_mapping) ~ author_mapping[author],
+              TRUE ~ author
+            ))
+        
+        # Define the mapping of original values to new values for the noteauthor column
+          noteauthor_mapping <- c(
+            "abu hamad, moh" = "abu hamad, moh'd rawhi abdullah m r",
+            "abu hamad, moh'd rawhi a" = "abu hamad, moh'd rawhi abdullah m r",
+            "aguilar, agustin jr." = "aguilar, agustin",
+            "brown, adam l" = "brown, ashley",
+            "cornelius, kacie" = "rytlewski, kacie",
+            "daniels, elizabeth c" = "smet, elizabeth c",
+            "ebach, dawn" = "ebach, dawn r",
+            "haskell, sarah e" = "haskell, sarah",
+            "lee, samantha b" = "lee, samantha",
+            "lin-dyken, deborah" = "lin-dyken, deborah c",
+            "ma, melinda a" = "whitacre, melinda a",
+            "madthil, sujana" = "madathil, sujana",
+            "meyer, heather" = "schmuecker, heather m",
+            "newton, kristina" = "sobaski, kristina t",
+            "norris, andrew" = "norris, andrew w",
+            "ramsey, laura" = "ramsey, laura j",
+            "reasoner, andrea l" = "porter, andrea l",
+            "scheffler, stephanie m" = "james, stephanie s",
+            "smith-mccartney, lindsey m" = "ewan, lindsey m",
+            "springman, alexandra l" = "keating, alexandra l"
+          )
+        
+        # Apply the mapping to the 'noteauthor' column
+          filtered_data <- filtered_data %>%
+            mutate(noteauthor = case_when(
+              noteauthor %in% names(noteauthor_mapping) ~ noteauthor_mapping[noteauthor],
+              noteauthor == "botos, madison" ~ "limke, wyatt l",
+              TRUE ~ noteauthor
+            ))
+
+        # Now join the fixed filtered data and the unfiltered data
+        all_data_5 <- bind_rows(filtered_data, unfiltered)
+        nrow(all_data_5) == nrow(all_data_4)
+        
+        # Check: Filter all rows where a unique note's signing author is not present in the authors' column; make sure rows are 0 now
+          any_issues <- all_data_5 %>%
+            group_by(noteid) %>%
+            filter(!noteauthor %in% author) %>%
+            ungroup()
+          nrow(any_issues) == 0
+
+# Cleaning resident names, adjust specific residents with changed names to match those in 'resident.names'
+
+  # Create a mapping vector (those names are inspired from previous work in 2022, however, from exploring the current data, it seems that the only different name is that of springman, alexandra which is now keating, alexandra)
+    name_mapping <- c(
+      "abu hamad, moh" = "abu hamad, moh'd rawhi abdullah m r",
+      "mcintire, natalie" = "mcintire, natalie r",
+      "daniels, elizabeth c" = "smet, elizabeth c",
+      "stover, daniel" = "stover, daniel w",
+      "ma, melinda a" = "whitacre, melinda a",
+      "keating, alexandra l" = "springman, alexandra l",
+      "cornelius, kacie" = "rytlewski, kacie",
+      "rytlewski, kacie t" = "rytlewski, kacie"
+    )
+  
+  # Apply the mapping to the 'noteauthor' and 'author' columns
+    all_data_6 <- all_data_5 %>%
+      mutate(author = case_when(
+        author %in% names(name_mapping) ~ name_mapping[author],
+        TRUE ~ author
+      )) %>%
+      mutate(noteauthor = case_when(
+        noteauthor %in% names(name_mapping) ~ name_mapping[noteauthor],
+        TRUE ~ noteauthor
+      ))
+    
+# Cleaning author service and author type (this is based on work done in 9/2023 and extended here to include any new providers; the unique noteauthors were exported, and the author service, and type, adjusted manually to crate the true.author.service file)
+    
+    # Join the file with the manually adjusted data to the main file
+    all_data_7 <- all_data_6 %>%
+      left_join(true.service, by = c("noteauthor" = "name")) %>%
+      # Update authorsservice
+      mutate(authorsservice = coalesce(authorsservice.y, authorsservice.x)) %>%
+      # Update authortype
+      mutate(authortype = coalesce(authortype.y, authortype.x)) %>%
+      # Remove the temporary .x and .y columns for both fields
+      select(-matches("\\.x$"), -matches("\\.y$")) %>%
+      # Update the authorservice to PED General if a reisdent wrote the note and the author service is NA
+      mutate(authorsservice = if_else(is.na(authorsservice) & authortype == "resident", "PED General", authorsservice))
+
+# Check that all "attendings" are present in true.service
+
+  # Step 1: Filter attending authors in all_data_7
+  attending_authors <- all_data_7 %>%
+    filter(authortype == "attending") %>%
+    select(noteauthor) %>%
+    distinct()
+  
+  # Step 2: Check against true.service names
+  unmatched_authors <- anti_join(attending_authors, true.service, by = c("noteauthor" = "name"))
+  
+  # Step 3: Provide a warning if there are discrepancies
+  if(nrow(unmatched_authors) > 0) {
+    warning("Fix the author service for any new note authors")
+    print(unmatched_authors) # Optionally print out the unmatched authors for review
+  } else {
+    print("All attending note authors are correctly matched in true.service")
+  }
+  
+  # Step 4: Provide a warning if there are discrepancies
+  if(nrow(all_data_3) != nrow(all_data_7)) {
+    warning("You have lost some rows while refining the data")
+    print(unmatched_authors) # Optionally print out the unmatched authors for review
+  } else {
+    print("You have not lost any rows while refining the data")
+  }
+
+  # Fixing the PED Nursery author service
+  all_data_8 <- all_data_7 %>%
+    mutate(
+      # Create a new column 'NNSY' based on specified conditions
+      nnsy = ifelse(
+        abs(difftime(dtofsvc, birthdate, units = "days")) <= 3 &
+          authorsservice %in% c("PED General", "PED Nursery", "Pediatrics") &
+          encountercontext %in% c("Inpatient") &
+          notetype != "Clinic Note",
+        "Yes",
+        "No"
+      )
+    ) %>%
+    # Update 'Author.s.Service' for 'NNSY' = "Yes"
+    mutate(
+      authorsservice = ifelse(nnsy == "Yes", "PED Nursery", authorsservice),
+    ) %>%
+    # Remove unneeded columns
+    select(-nnsy)
+  
+summary.6 = sum_df(all_data_8)
+
+# Determine PGY for each resident and for each time interval
+  # Define the date ranges
+  date_21_start <- as.POSIXct("2021-07-01 00:00:00")
+  date_21_end <- as.POSIXct("2022-06-30 23:59:59")
+  date_22_start <- as.POSIXct("2022-07-01 00:00:00")
+  date_22_end <- as.POSIXct("2023-06-30 23:59:59")
+  date_23_start <- as.POSIXct("2023-07-01 00:00:00")
+  date_23_end <- as.POSIXct("2024-06-30 23:59:59")
+  before_end <- as.POSIXct("2021-06-30 23:59:59")
+  after_start <- as.POSIXct("2024-07-01 00:00:00")
+  
+  # Filter the data based on the date ranges
+  data_21 <- all_data_8 %>% filter(editstart >= date_21_start & editstart <= date_21_end)
+  data_22 <- all_data_8 %>% filter(editstart >= date_22_start & editstart <= date_22_end)
+  data_23 <- all_data_8 %>% filter(editstart >= date_23_start & editstart <= date_23_end)
+  before <- all_data_8 %>% filter(editstart <= before_end)
+  after <- all_data_8 %>% filter(editstart >= after_start)
+
+  # Check that no values were missed
+  total_rows <- nrow(all_data_8)
+  filtered_rows <- nrow(data_21) + nrow(data_22) + nrow(data_23) + nrow(before) + nrow(after)
+  
+  if(total_rows == filtered_rows) {
+    print("All rows have been accounted for.")
+  } else {
+    print("Some rows have been missed.")
+  }
+  
+    # Apply conditions directly without a function
+    data_21 <- data_21 %>%
+      mutate(pgy = case_when(
+        author %in% resident.names$`PGY.3` ~ "pgy1.21.22",
+        author %in% resident.names$`PGY.4` ~ "pgy2.21.22",
+        author %in% resident.names$`PGY.5` ~ "pgy3.21.22",
+        TRUE ~ NA_character_
+      ))
+    # Apply conditions directly without a function
+    data_22 <- data_22 %>%
+      mutate(pgy = case_when(
+        author %in% resident.names$`PGY.2` ~ "pgy1.22.23",
+        author %in% resident.names$`PGY.3` ~ "pgy2.22.23",
+        author %in% resident.names$`PGY.4` ~ "pgy3.22.23",
+        TRUE ~ NA_character_
+      ))
+    # Apply conditions directly without a function
+    data_23 <- data_23 %>%
+      mutate(pgy = case_when(
+        author %in% resident.names$`PGY.1` ~ "pgy1.23.24",
+        author %in% resident.names$`PGY.2` ~ "pgy2.23.24",
+        author %in% resident.names$`PGY.3` ~ "pgy3.23.24",
+        TRUE ~ NA_character_
+      ))
+  
+  # join the 3 dataframes, leaving out those outside the date range
+  all_data_8 <- bind_rows(data_21, data_22, data_23)
+
+  # Remove these rows from the original data frame
+  all_data_9 <- all_data_8 %>%
+    filter(
+      (`edittime(seconds)` > 5 & !author %in% staffs) |  # Handle edittime and author conditions
+      (`edittime(seconds)` > 0 & author %in% staffs)   # Handle edittime and author conditions
+    )
+  
+  all_data_9 <- all_data_9 %>%
+    filter((is.na(notesize) | notesize != 0))    # Keep notesize that are NA or not zero
+
+    nrow(all_data_8)
+    nrow(all_data_9)
+    # These are unaccounted for since they are overlapped between the criteria above (e.g. <5 seconds and before 6/30/21)
+      removed = - nrow(all_data_9) + nrow(all_data_8)
+      print(removed)
+
+    summary.7 <- sum_df(all_data_9)
+
+# Delete all notes where a resident did not have a true contribution (<5 seconds). We will group the dataframe by note id, then look at all the editing instances of each unique note id, and if the pgy column do not include one of the residents (all its values are), then will delete these note ids
+
+filtered_data <- all_data_9 %>%
+  group_by(noteid) %>%
+  filter(!all(is.na(pgy))) %>%
+  ungroup()
+    
+  cons.data <- filtered_data %>%
+    group_by(noteid) %>%
+    group_by(noteid) %>%
+    summarise(total.time = sum(`edittime(seconds)`), 
+              across(everything(), first),
+              .groups = "drop")
+  
+# 2- attendings file (consolidated by ID, all attending edits for each note combined), delete unneeded columns
+  staff.data <- filtered_data %>%
+    filter(author %in% staffs) %>%
+    group_by(noteid) %>%
+    summarise(staff.time = sum(`edittime(seconds)`), 
+              across(everything(), first),
+              .groups = "drop")
+
+# 3- resident and class files (consolidated by ID and class/resident, all notes), delete unneeded columns
+  resident.data <- filtered_data %>%
+    filter(pgy != "NA") %>%
+    group_by(noteid) %>%
+    summarise(resident.time = sum(`edittime(seconds)`), 
+              across(everything(), first),
+              .groups = "drop")
+
+# Join the resident and staff eidting time columns to the main dataframe
+  # Join staff.time from staff.data
+  cons.data <- cons.data %>%
+    left_join(staff.data %>% select(noteid, staff.time), by = "noteid")
+  
+  # Join resident.time from resident.data
+  cons.data <- cons.data %>%
+    left_join(resident.data %>% select(noteid, resident.time), by = "noteid")
+  
+  
+# Summary statement
+summary_messages <- c(
+  paste("At the beginning, there were", nrow(all_data_1), "notes. Out of these, notes with equal or incomplete edit time data counted", nrow(not_equal), "and", nrow(no_times), ", respectively.", na_count, "notes had incorrect times to calculate a start-to-stop value. The file was then separated for each edit instance resulting in", nrow(all_data_3), "instances, of which", nrow(all_data_8) - nrow(all_data_9), "were removed because these lasted <5 seconds and were not attending edits or lasted <1 second and were attending edits, or contained 0 characters.", nrow(before) + nrow(after), "editing instances were removed because they occurred before 7/1/21 or after 6/30/24. Further", nrow(all_data_9) - nrow(filtered_data), "editing instances were removed since there were no true resident contributions to the associated notes. The final note count after refinements is", nrow(cons.data), "meaning that", (nrow(all_data_2) - nrow(cons.data)), "notes were excluded while editing instances were refined."),
+  paste("Total number of excluded notes is (both numbers should be equal):", nrow(not_equal) + nrow(no_times) + (nrow(all_data_2) - nrow(cons.data)), nrow(all_data_1) - nrow(cons.data))
+)
+
+# To print the messages, you can then do:
+print(summary_messages[1])  # Print first message
+print(summary_messages[2])  # Print second message
+      
+saveRDS(filtered_data, file = "all_data.rds")
+saveRDS(cons.data, file = "cons_data.rds")
+saveRDS(staff.data, file = "staff_data.rds")
+saveRDS(resident.data, file = "resident_data.rds")
+saveRDS(summary_messages, file = "summary_messages.rds")
+
+```
+
+
+```{r, EDA & CLT, echo=FALSE}
+
+# read the main file
+cons.data <- readRDS("cons_data.rds")
+k = sum_df(cons.data)
+
+# Columns to be deleted
+cols_to_delete <- c("birthdate", "author", "day", "editstart", "editstop", "edittime(seconds)", 
+                    "noteauthorlogindept", "noteauthornpi", "noteduration(physician)", 
+                    "noteduration(resident)", "shift", "specialtyatnote", 
+                    "specialtycurrent", "timediff(hr)")
+
+# Delete specified columns
+cons.data <- cons.data %>% select(-all_of(cols_to_delete))
+
+# Create a new column "other.time"
+cons.data <- cons.data %>%
+  mutate(other.time = total.time - staff.time - resident.time)
+
+# Change "smartphraseids" into a numerical column by counting the number of occurrences of "["
+cons.data <- cons.data %>%
+  mutate(smartphraseids = str_count(smartphraseids, "\\["))
+
+# Define the columns to be plotted
+columns1 <- c("notetype", "cosigninformation", "notestatus", "authorsservice", "encountercontext", "sharedwithpatient")
+columns2 <- c("reasonforblockingnote", "ccas", "pgy")
+
+# Create and save plots
+create_and_save_plots(cons.data, columns1, "combined_plot1")
+create_and_save_plots(cons.data, columns2, "combined_plot2")
+
+# Create and save plots for numeric variables
+create_and_save_numeric_plots(cons.data, "numeric_plot")
+
+#Given the very large number of measurements in the dataset, the data, untransformed, vs the data after several different transformations was tested as to whether it meets the central limit theorem (CLT, i.e. 1000 samples, each of 500 measurements - reflecting the large subsets we would work with - were taken and the means were QQ plotted and tested for normality using the Anderson-Darling normality and Shapiro-Walk normality tests). This was done to the 9 numeric variables below and the log transformation, with its ease of use, was thought to be the best transformation to use as all the transformed variables met normality estimate and therefore the CLT was assumed to apply for each.
+
+# Define the columns to be analyzed
+columns <- c("total.time", "resident.time", "staff.time", "other.time", "notesize", "%copied", "%voice", "starttostop", "smartphraseids")
+
+# Perform analysis (results is a dataframe with normality test results for each transformation and each column)
+results <- analyze_transformations(cons.data, columns)
+print(results)
+
+# Filter and summarize data for each note type
+plot_data <- cons.data %>%
+  filter(notetype %in% c("Clinic Note", "H&P", "Progress Note", "Discharge Summary")) %>%
+  group_by(month = floor_date(dtofsvc, "month"), notetype) %>%
+  summarise(mean_time = mean(total.time), .groups = 'drop')
+
+# Plotting based on dtofsvc
+plot_dtofsvc <- ggplot(plot_data, aes(x = month, y = mean_time, color = notetype)) +
+  geom_line() +
+  labs(title = "Monthly Trend of Total Time by Note Type (dtofsvc)",
+       x = "Month",
+       y = "Average Total Time (min)",
+       color = "Note Type") +
+  theme_minimal()
+
+# Save the plot to working directory
+ggsave("plot_dtofsvc.png", plot = plot_dtofsvc, width = 10, height = 6, dpi = 300)
+
+# Adjust data filtering and summarization for filetime
+plot_data_filetime <- cons.data %>%
+  filter(notetype %in% c("Clinic Note", "H&P", "Progress Note", "Discharge Summary")) %>%
+  group_by(month = floor_date(filetime, "month"), notetype) %>%
+  summarise(mean_time = mean(total.time), .groups = 'drop')
+
+# Plotting based on filetime
+plot_filetime <- ggplot(plot_data_filetime, aes(x = month, y = mean_time, color = notetype)) +
+  geom_line() +
+  labs(title = "Monthly Trend of Total Time by Note Type (filetime)",
+       x = "Month",
+       y = "Average Total Time (min)",
+       color = "Note Type") +
+  theme_minimal()
+
+# Save the plot to working directory
+ggsave("plot_filetime.png", plot = plot_filetime, width = 10, height = 6, dpi = 300)
+
+```
+
+
+```{r, CLT, echo=FALSE}
+
+
+
+```
+
+```{r, refining files for analysis, eval=FALSE, echo=FALSE, include=FALSE}
+
+all.data <- readRDS("all_data.rds")
+cons.data <- readRDS("cons_data.rds")
+staff.data <- readRDS("staff_data.rds")
+resident.data <- readRDS("resident_data.rds")
+summary <- readRDS("summary_messages.rds")
+print(summary)
+summary.all <- sum_df(all.data)
+summary.cons <- sum_df(cons.data)
+summary.staff <- sum_df(staff.data)
+summary.resident <- sum_df(resident.data)
+
+# Names of all residents over the last 3 years, per year. Names have changed to some extent overtime, the names in the above uploaded files will be adjusted to match the ones in this file
+resident.names <- read.csv("C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Edited files\\All Residents 21-24.csv")
+  res_vector <- unlist(resident.names)
+
+# The true service of all attendings, inspired by earlier work and updated in 7/2024
+true.service <- read_xlsx("C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Edited files\\true.author.service.7.24.xlsx")
+  staffs <- true.service %>%
+    filter(authortype == "attending") %>%
+    pull(name)
+
+# 1- day and shift file (all editing instances), delete unneeded columns
+  day.shift.residents <- all.data %>%
+    filter(!is.na(pgy))
+
+# Step 5: Join the edit times for resident time
+cons.data <- cons.data %>%
+  left_join(residents1, by = "noteid") %>%
+  left_join(staffs, by = "noteid")
+
+```  
+  
+
+```{r, table 1, echo=FALSE}
+
+# context vs type/service
+cons.data <- readRDS("cons_data.rds")
+
+summary_table <- cons.data %>%
+  group_by(authorsservice, encountercontext, notetype) %>%
+  summarise(count = n(), .groups = 'drop')
+
+wide_table <- summary_table %>%
+  pivot_wider(names_from = encountercontext, values_from = count, values_fill = list(count = 0)) %>%
+  pivot_wider(names_from = notetype, values_from = c(`Ambulatory`, `Emergency Department`, `Inpatient`, `Telephone Encounter`))
+
+# Assign 'notetype' as row names and then drop the column
+wide_table$row_names <- wide_table$authorsservice
+wide_table <- wide_table %>% 
+  remove_rownames() %>%
+  column_to_rownames(var = "row_names") %>%
+  select(-authorsservice)
+
+# Adding a Total row
+total_row <- wide_table %>% 
+  summarise(across(everything(), ~sum(.x, na.rm = TRUE)))
+
+# Add the 'Total' row to the original dataframe
+wide_table <- rbind(wide_table, total_row)
+rownames(wide_table)[nrow(wide_table)] <- "Total"  # Naming the total row
+
+# Adding a Total column
+wide_table$total <- rowSums(wide_table, na.rm = TRUE)
+
+# Step 1: Consolidate rows with total < 500 into "Other" row
+# Identify rows with total < 500
+low_total_rows <- rownames(wide_table)[wide_table$total < 500]
+
+# Sum these rows into one row and remove them from the original data frame
+other_row <- wide_table[low_total_rows, , drop = FALSE] %>%
+  summarise(across(everything(), ~ sum(.x, na.rm = TRUE)))
+
+# Add this new 'Other' row
+wide_table <- wide_table[!rownames(wide_table) %in% low_total_rows, , drop = FALSE]
+wide_table <- rbind(wide_table, other_row)
+rownames(wide_table)[nrow(wide_table)] <- "Other"
+
+# Step 2: Consolidate columns with total in 'Total' row < 500 into "Other" column
+# Identify columns with total < 500
+low_total_columns <- names(wide_table)[wide_table["Total", ] < 500]
+
+# Sum these columns into one column and remove them from the original data frame
+wide_table$Other <- rowSums(wide_table[, low_total_columns, drop = FALSE], na.rm = TRUE)
+wide_table <- wide_table[, !names(wide_table) %in% low_total_columns]
+
+# Sort the dataframe by the 'Total' column, descending order
+wide_table <- wide_table %>% 
+  arrange(desc(total))
+
+# Transpose the dataframe
+wide_table_transposed <- as.data.frame(t(wide_table))
+
+# Convert row names into a column if needed for sorting
+wide_table_transposed$categories <- rownames(wide_table_transposed)
+
+# Sort by the 'Total' row, now a column after transposition
+wide_table_transposed <- wide_table_transposed %>% 
+  arrange(desc(`Total`))  # assuming 'Total' is now a column after transposition
+
+# Optionally, transpose back if needed for presentation
+wide_table_sorted <- t(wide_table_transposed)
+
+# Convert back to data.frame if necessary
+wide_table_sorted <- as.data.frame(wide_table_sorted)
+
+# Calculate the grand total (excluding the 'Total' and 'Other' columns)
+grand_total <- wide_table["Total", "total"]
+
+# Convert 'Total' row and column to show both counts and percentages
+wide_table["Total", -which(names(wide_table) %in% c("total", "Other"))] <- 
+  sapply(wide_table["Total", -which(names(wide_table) %in% c("total", "Other"))], 
+         function(x) sprintf("%d (%.2f%%)", x, x / grand_total * 100))
+
+wide_table[-nrow(wide_table), "total"] <- 
+  sapply(wide_table[-nrow(wide_table), "total"], 
+         function(x) sprintf("%d (%.2f%%)", x, x / grand_total * 100))
+
+# Convert 'Other' column to show both count and percentage for the 'Total' row
+wide_table["Total", "Other"] <- 
+  sprintf("%d (%.2f%%)", wide_table["Total", "Other"], wide_table["Total", "Other"] / grand_total * 100)
+
+write.csv(wide_table, "table.1.csv")
+writeLines(low_total_columns, "other.columns.txt")
+writeLines(low_total_rows, "other.rows.txt")
+
+```
+
+
+
+
+
+
+
+

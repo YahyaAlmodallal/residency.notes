@@ -1,0 +1,20 @@
+,Inpatient,,,,,,Ambulatory,,,,,
+,Event,H&P,Consults,Progress Notes,Discharge Summary,Procedures,Clinic Note,Flowsheet Note,ED,Other,Telephone Encounter,Total
+PED General,,,,,,,37401,7314,,561,1154,72743
+,563,4583,58,13735,7092,282,,,,,,
+Critical Care PICU,153,3121,1,10221,615,121,2,0,,153,5,14392
+Critical Care NICU,142,1048,,7712,1038,2827,2,,,135,6,12910
+PED Nursery,29,2037,,4731,4460,856,46,,,0,1,12160
+PED Hematology/Oncology,23,586,3,6543,1841,19,119,1,,6,7,9148
+Emergency Department,0,0,0,0,,0,0,0,5953,356,8,6317
+PED GI,10,900,21,2533,981,20,784,,,16,3,5268
+PED Cardiology,8,325,5,2355,688,47,1423,,,2,1,4854
+PED Nephrology,4,496,3,1942,571,13,847,,,5,2,3883
+PED Neurology,15,1085,6,1051,1165,21,509,,,12,2,3866
+PED Endocrinology,4,311,3,274,482,1,1503,,,1,5,2584
+PED Pulmory,6,224,,748,447,22,748,,,0,,2195
+Other,30,6,204,224,23,1,1569,4,0,37,15,2113
+PED Infectious Disease,9,,536,885,,1,105,,,3,14,1553
+CDD,,,0,1,,,1390,,,2,,1393
+PED Allergy/Immunology,0,1,2,,,,511,,,4,,518
+Total,996,14723,842,52955,19403,4231,46959,7319,5953,1293,1223,155897
