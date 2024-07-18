@@ -433,6 +433,15 @@ summary.1 <- sum_df(all_data_1)
         print("There is a discrepancy in the data. Not all NAs are for ED notes or the counts do not match.")
     }
 
+
+# Adding weekend, after hours (for ambulatory notes), and PM shift (for inpatient notes) columns
+all_data_3 <- all_data_3 %>%
+  mutate(
+    weekend = if_else(day %in% c("Saturday", "Sunday"), `edittime(seconds)`, NA_real_),
+    after.hours = if_else(shift == "After work-hours", `edittime(seconds)`, NA_real_),
+    pm = if_else(shift == "PM shift", `edittime(seconds)`, NA_real_)
+  )
+    
 # Cleaning the author and note author columns and making sure every signing note author name is present as an author of the same note
   
   # Clean the Author column (remove the [########] from the end of each name)
@@ -696,10 +705,14 @@ filtered_data <- all_data_9 %>%
     
   cons.data <- filtered_data %>%
     group_by(noteid) %>%
-    group_by(noteid) %>%
-    summarise(total.time = sum(`edittime(seconds)`), 
-              across(everything(), first),
-              .groups = "drop")
+    summarise(
+      total.time = sum(`edittime(seconds)`),
+      weekend = sum(weekend, na.rm = TRUE),
+      after.hours = sum(after.hours, na.rm = TRUE),
+      pm = sum(pm, na.rm = TRUE),
+      across(everything(), first),
+      .groups = "drop"
+    )
   
 # 2- attendings file (consolidated by ID, all attending edits for each note combined), delete unneeded columns
   staff.data <- filtered_data %>%
@@ -709,13 +722,20 @@ filtered_data <- all_data_9 %>%
               across(everything(), first),
               .groups = "drop")
 
-# 3- resident and class files (consolidated by ID and class/resident, all notes), delete unneeded columns
-  resident.data <- filtered_data %>%
+# 3- all residents file (consolidated by ID and class/resident, all notes), delete unneeded columns
+  all.resident.data <- filtered_data %>%
     filter(pgy != "NA") %>%
     group_by(noteid) %>%
     summarise(resident.time = sum(`edittime(seconds)`), 
               across(everything(), first),
               .groups = "drop")
+
+# 4- Individual resident file (consolidated by residents)
+
+  
+# 5- Class file (consolidated by class and PGY)
+
+  
 
 # Join the resident and staff eidting time columns to the main dataframe
   # Join staff.time from staff.data
