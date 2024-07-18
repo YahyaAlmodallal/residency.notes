@@ -369,7 +369,7 @@ summary.1 <- sum_df(all_data_1)
   summary.4 <- sum_df(no_times)
   
 # The edit start and edit stop dates are not uniform, there were about 3000 values where the dates are shown as serial numbers, luckily these are easy to extract since each has a single editing instance
-  # Extract serial number dates and convert them back to actual dates, then calculate the time betwene the start and end of each note
+  # Extract serial number dates and convert them back to actual dates, then calculate the time between the start and end of each note
   filtered_data <- all_data_2 %>%
     filter(grepl("^[0-9]+\\.?[0-9]*$", editstart), grepl("^[0-9]+\\.?[0-9]*$", editstop)) %>%
     mutate(
