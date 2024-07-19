@@ -66,6 +66,7 @@ library(glue)
 library(reshape2)
 library(GGally)
 library(boot)
+library(car)
 conflict_prefer("select", "dplyr")
 conflicts_prefer(dplyr::filter)  # Set conflict resolution preferences
 
@@ -924,11 +925,11 @@ create_and_save_numeric_plots(cons.data, "numeric_plot")
 #Given the very large number of measurements in the dataset, the data, untransformed, vs the data after several different transformations was tested as to whether it meets the central limit theorem (CLT, i.e. 1000 samples, each of 500 measurements - reflecting the large subsets we would work with - were taken and the means were QQ plotted and tested for normality using the Anderson-Darling normality and Shapiro-Walk normality tests). This was done to the 9 numeric variables below and the log transformation, with its ease of use, was thought to be the best transformation to use as all the transformed variables met normality estimate and therefore the CLT was assumed to apply for each.
 
 # Define the columns to be analyzed
-columns <- c("total.time", "resident.time", "staff.time", "other.time", "notesize", "%copied", "%voice", "starttostop", "smartphraseids")
+columns <- c("total.time", "resident.time", "staff.time", "other.time", "notesize", "%copied", "%voice", "starttostop", "smartphraseids", "resident.percent")
 
 # Perform analysis (results is a dataframe with normality test results for each transformation and each column)
 results <- analyze_transformations(cons.data, columns)
-print(results)
+#print(results)
 
 # Filter and summarize data for each note type
 plot_data <- cons.data %>%
@@ -967,31 +968,6 @@ plot_filetime <- ggplot(plot_data_filetime, aes(x = month, y = mean_time, color 
 ggsave("plot_filetime.png", plot = plot_filetime, width = 10, height = 6, dpi = 300)
 
 ```
-
-
-```{r, refining files for analysis, eval=FALSE, echo=FALSE, include=FALSE}
-
-all.data <- readRDS("all_data.rds")
-cons.data <- readRDS("cons_data.rds")
-per.resident <- readRDS("per.resident.rds")
-summary <- readRDS("summary_messages.rds")
-print(summary)
-summary.all <- sum_df(all.data)
-summary.cons <- sum_df(cons.data)
-
-# Names of all residents over the last 3 years, per year. Names have changed to some extent overtime, the names in the above uploaded files will be adjusted to match the ones in this file
-resident.names <- read.csv("C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Edited files\\All Residents 21-24.csv")
-  res_vector <- unlist(resident.names)
-
-# The true service of all attendings, inspired by earlier work and updated in 7/2024
-true.service <- read_xlsx("C:\\Users\\yahya\\OneDrive\\Research\\residency.notes\\Edited files\\true.author.service.7.24.xlsx")
-  staffs <- true.service %>%
-    filter(authortype == "attending") %>%
-    pull(name)
-
-
-
-```  
 
 
 ```{r, per resident and figure 1, echo=false}
@@ -1243,7 +1219,7 @@ final_pairwise_results <- bind_rows(
 
 
 # Perform ANOVA and post-hoc pairwise comparisons
-perform_anova <- function(data, variable, alpha = 0.01) {
+perform_anova <- function(data, variable) {
   data <- data %>%
     mutate(log_value = log(.data[[variable]]))
   
@@ -1253,19 +1229,10 @@ perform_anova <- function(data, variable, alpha = 0.01) {
   
   # Perform Tukey's HSD post-hoc test if ANOVA is significant
   if (anova_summary[[1]]$`Pr(>F)`[1] < 0.05) {
-    tukey_result <- TukeyHSD(anova_result, conf.level = 1 - alpha)
+    tukey_result <- TukeyHSD(anova_result)
     tukey_df <- as.data.frame(tukey_result$notetype) %>%
       rownames_to_column("comparison") %>%
       separate(comparison, into = c("group1", "group2"), sep = "-")
-    
-    # Transform the results back from the log scale
-    tukey_df <- tukey_df %>%
-      mutate(
-        ratio = exp(diff),
-        ci_lower = exp(lwr),
-        ci_upper = exp(upr),
-        significant = ifelse(`p adj` < alpha, "Yes", "No")
-      )
     
     return(tukey_df)
   } else {
@@ -1285,11 +1252,10 @@ final_anova_results <- bind_rows(
   anova_staff_time %>% mutate(variable = "staff.time")
 )
 
-# Filter for significant results
-final_anova_results <- final_anova_results %>% filter(significant == "Yes")
-
-
-
+# Join the p-value column from final_anova_results to final_pairwise_results
+final_combined_results <- final_pairwise_results %>%
+  left_join(final_anova_results %>% select(group1, group2, variable, `p adj`), 
+            by = c("group1", "group2", "variable"))
 
 ```
 
