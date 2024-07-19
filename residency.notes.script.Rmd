@@ -64,6 +64,8 @@ library(rlang)
 library(nortest)
 library(glue)
 library(reshape2)
+library(GGally)
+library(boot)
 conflict_prefer("select", "dplyr")
 conflicts_prefer(dplyr::filter)  # Set conflict resolution preferences
 
@@ -1076,6 +1078,78 @@ all.data <- readRDS("all_data.rds")
 
 ```
 
+
+```{r, correlations}
+
+cons.data <- readRDS("cons_data.rds")
+
+# Calculate the logarithm of total time
+cons.data <- cons.data %>%
+  mutate(log_total_time = log(total.time + 1),  # Adding 1 to avoid log(0) if any zeros exist
+         smart_phrases_count = str_count(smartphraseids, "\\["))  # Count "[" in smartphraseids
+
+# Select relevant columns
+selected_data <- cons.data %>%
+  select(log_total_time, `%copied`, `%voice`, smart_phrases_count, weekend,
+         pm, notesize, resident.time, staff.time, iteration, starttostop,
+         sources, resident.percent)
+
+# Calculate correlation matrix
+correlation_matrix <- cor(selected_data, method = "pearson", use = "complete.obs")  # Handles missing values by listwise deletion
+
+print(correlation_matrix)
+
+# Melting the correlation matrix into a long format
+melted_corr_matrix <- melt(correlation_matrix)
+
+# Plotting the heatmap
+x = ggplot(data = melted_corr_matrix, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.2f", value)), size = 3, color = "black") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1,1)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 0, hjust = 1)) +
+  labs(title = "Heatmap of Pearson Correlation with Coefficients", x = "", y = "", fill = "Correlation")
+ggsave("xx.png", plot = x, width = 14, height = 12)
+
+# Sampling a subset of the data, for example 10% of the rows
+sampled_data <- selected_data[sample(nrow(selected_data), size = 0.1 * nrow(selected_data)),]
+
+# Create matrix of scatter plots with sampled data
+c = ggpairs(sampled_data, 
+        columns = c("log_total_time", "%copied", "%voice", "smart_phrases_count", "weekend",
+                    "pm", "notesize", "resident.time", "staff.time", "iteration", "starttostop",
+                    "sources", "resident.percent"),
+        lower = list(continuous = "points"), 
+        upper = list(continuous = "cor"),
+        diag = list(continuous = "barDiag"))
+ggsave("cc.png", plot = c, width = 14, height = 12)
+
+
+# Function to calculate correlation for bootstrapping
+correlation_function <- function(data, indices) {
+  d <- data[indices,]  # allows bootstrapping to sample with replacement
+  cor(d[[1]], d[[2]], use = "complete.obs")  # Calculates correlation
+}
+
+
+# Fitting the model
+model <- lm(total.time ~ `%copied` + `%voice` + smart_phrases_count + weekend + pm + 
+            notesize + resident.time + staff.time + iteration + starttostop + 
+            sources + resident.percent, data = cons.data)
+
+# Summarizing the model
+summary(model)
+
+# Plotting residuals
+par(mfrow=c(2,2))
+plot(model)
+
+
+```
+
+
 ```{r, table 1, echo=FALSE}
 
 # context vs type/service
@@ -1171,7 +1245,7 @@ writeLines(low_total_rows, "other.rows.txt")
 ```
 
 
-```{r}
+```{r, summary}
 
 resident_counts <- resident.names %>%
   summarise(across(everything(), ~ sum(!is.na(.))))
