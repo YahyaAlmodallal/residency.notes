@@ -1091,25 +1091,29 @@ all.data <- readRDS("all_data.rds")
 
 cons.data <- readRDS("cons_data.rds")
 
-# Calculate the logarithm of total time
+# Applying multiple transformations in a single pipeline
 cons.data <- cons.data %>%
-  mutate(smart_phrases_count = str_count(smartphraseids, "\\["))  # Count "[" in smartphraseids
+  # Count "[" in smartphraseids to get the number of smart phrases used
+  mutate(smart_phrases_count = str_count(smartphraseids, "\\[")) %>%
+  
+  # Calculate 'other.time' as 'total.time' minus 'staff.time' and 'resident.time'
+  mutate(other.time = total.time - staff.time - resident.time) %>%
+  
+  # Create 'outside.work.hours' by combining 'pm' and 'weekend' where the first non-NA value is chosen
+  mutate(outside.work.hours = coalesce(pm, after.hours)) %>%
+  
+  # Apply log1p transformation to multiple variables
+  mutate_at(vars(outside.work.hours, notesize, total.time, weekend, 
+                 resident.time, staff.time, other.time, starttostop),
+            ~ log1p(.))  # log1p to handle zeros by transforming log(1 + x)
 
-# Create a new column "other.time"
-cons.data <- cons.data %>%
-  mutate(other.time = total.time - staff.time - resident.time)
-
-# Applying log transformation to the predictors
-cons.data <- cons.data %>%
-  mutate_at(vars(weekend, pm, notesize, total.time, after.hours, resident.time, staff.time, other.time, starttostop),
-            ~ log1p(.))  # log1p is used to apply log(1 + x) to avoid log(0)
-
-# Select relevant columns
+# Select relevant columns for further analysis
 selected_data <- cons.data %>%
-  select(total.time, `%copied`, `%voice`, weekend, pm, notesize, resident.time, staff.time, other.time, starttostop, resident.percent, after.hours)
+  select(total.time, `%copied`, `%voice`, outside.work.hours, notesize, 
+         resident.time, staff.time, other.time, starttostop, resident.percent, weekend)
 
 # Calculate correlation matrix
-correlation_matrix <- cor(selected_data, method = "pearson", use = "pairwise.complete.obs")  # Handles missing values by listwise deletion
+correlation_matrix <- cor(selected_data, method = "pearson", use = "complete.obs")  # Handles missing values by listwise deletion
 
 print(correlation_matrix)
 
@@ -1127,12 +1131,9 @@ x = ggplot(data = melted_corr_matrix, aes(x = Var1, y = Var2, fill = value)) +
   labs(title = "Heatmap of Pearson Correlation with Coefficients", x = "", y = "", fill = "Correlation")
 ggsave("xx.png", plot = x, width = 14, height = 12)
 
-# Sampling a subset of the data, for example 10% of the rows
-sampled_data <- selected_data[sample(nrow(selected_data), size = 0.1 * nrow(selected_data)),]
-
 # Creating the matrix of scatter plots with slope lines in the lower triangle
 c <- ggpairs(selected_data,
-             columns = c("total.time", "%copied", "%voice", "weekend", "pm", "notesize", "resident.time", "staff.time", "starttostop", "resident.percent", "after.hours", "other.time"),
+             columns = c("total.time", "%copied", "%voice", "outside.work.hours", "notesize", "resident.time", "staff.time", "starttostop", "resident.percent", "weekend", "other.time"),
              lower = list(continuous = function(data, mapping, ...) {
                  ggplot(data = data, mapping = mapping) + 
                      geom_point(color = "blue") +
@@ -1146,6 +1147,146 @@ print(c)
 
 # Saving the plot
 ggsave("cc.png", plot = c, width = 14, height = 12)
+
+
+```
+
+
+```{r, comparisons}
+
+cons.data <- readRDS("cons_data.rds")
+
+# Create a new column "other.time"
+cons.data <- cons.data %>%
+  mutate(other.time = total.time - staff.time - resident.time)
+
+calc_pairwise_stats <- function(data, variable, min_obs = 2) {
+  data <- data %>%
+    mutate(log_value = log(.data[[variable]]))
+  
+  summary_stats <- data %>%
+    group_by(notetype) %>%
+    summarize(
+      mean = mean(log_value, na.rm = TRUE),
+      sd = sd(log_value, na.rm = TRUE),
+      ci_lower = mean(log_value, na.rm = TRUE) - qt(0.975, df = n() - 1) * sd(log_value, na.rm = TRUE) / sqrt(n()),
+      ci_upper = mean(log_value, na.rm = TRUE) + qt(0.975, df = n() - 1) * sd(log_value, na.rm = TRUE) / sqrt(n()),
+      n = n(),
+      .groups = 'drop'
+    ) %>%
+    filter(n >= min_obs)
+  
+  notetypes <- summary_stats$notetype
+  
+  pairwise_results <- do.call(rbind, lapply(notetypes, function(type1) {
+    do.call(rbind, lapply(notetypes, function(type2) {
+      if (type1 != type2) {
+        group1 <- data %>% filter(notetype == type1) %>% pull(log_value)
+        group2 <- data %>% filter(notetype == type2) %>% pull(log_value)
+        
+        if (length(group1) >= min_obs && length(group2) >= min_obs) {
+          t_test <- tryCatch(t.test(group1, group2), error = function(e) NULL)
+          
+          if (!is.null(t_test)) {
+            mean.group1 <- mean(group1, na.rm = TRUE)
+            sd.group1 <- sd(group1, na.rm = TRUE)
+            ci_lower.group1 <- mean.group1 - qt(0.975, df = length(group1) - 1) * sd.group1 / sqrt(length(group1))
+            ci_upper.group1 <- mean.group1 + qt(0.975, df = length(group1) - 1) * sd.group1 / sqrt(length(group1))
+            
+            mean.group2 <- mean(group2, na.rm = TRUE)
+            sd.group2 <- sd(group2, na.rm = TRUE)
+            ci_lower.group2 <- mean.group2 - qt(0.975, df = length(group2) - 1) * sd.group2 / sqrt(length(group2))
+            ci_upper.group2 <- mean.group2 + qt(0.975, df = length(group2) - 1) * sd.group2 / sqrt(length(group2))
+            
+            data.frame(
+              group1 = type1,
+              group2 = type2,
+              mean.group1 = exp(mean.group1),
+              sd.group1 = exp(sd.group1),
+              ci_lower.group1 = exp(ci_lower.group1),
+              ci_upper.group1 = exp(ci_upper.group1),
+              mean.group2 = exp(mean.group2),
+              sd.group2 = exp(sd.group2),
+              ci_lower.group2 = exp(ci_lower.group2),
+              ci_upper.group2 = exp(ci_upper.group2),
+              p.value = t_test$p.value
+            )
+          } else {
+            NULL
+          }
+        } else {
+          NULL
+        }
+      } else {
+        NULL
+      }
+    }))
+  }))
+  
+  return(pairwise_results)
+}
+
+# Perform the pairwise comparison for each variable with minimum observation threshold
+pairwise_stats_resident_time <- calc_pairwise_stats(cons.data, "resident.time")
+pairwise_stats_total_time <- calc_pairwise_stats(cons.data, "total.time")
+pairwise_stats_staff_time <- calc_pairwise_stats(cons.data, "staff.time")
+
+# Combine the results into one dataframe
+final_pairwise_results <- bind_rows(
+  pairwise_stats_resident_time %>% mutate(variable = "resident.time"),
+  pairwise_stats_total_time %>% mutate(variable = "total.time"),
+  pairwise_stats_staff_time %>% mutate(variable = "staff.time")
+) %>%
+  select(variable, group1, group2, mean.group1, sd.group1, ci_lower.group1, ci_upper.group1,
+         mean.group2, sd.group2, ci_lower.group2, ci_upper.group2, p.value)
+
+
+
+# Perform ANOVA and post-hoc pairwise comparisons
+perform_anova <- function(data, variable, alpha = 0.01) {
+  data <- data %>%
+    mutate(log_value = log(.data[[variable]]))
+  
+  # Perform ANOVA
+  anova_result <- aov(log_value ~ notetype, data = data)
+  anova_summary <- summary(anova_result)
+  
+  # Perform Tukey's HSD post-hoc test if ANOVA is significant
+  if (anova_summary[[1]]$`Pr(>F)`[1] < 0.05) {
+    tukey_result <- TukeyHSD(anova_result, conf.level = 1 - alpha)
+    tukey_df <- as.data.frame(tukey_result$notetype) %>%
+      rownames_to_column("comparison") %>%
+      separate(comparison, into = c("group1", "group2"), sep = "-")
+    
+    # Transform the results back from the log scale
+    tukey_df <- tukey_df %>%
+      mutate(
+        ratio = exp(diff),
+        ci_lower = exp(lwr),
+        ci_upper = exp(upr),
+        significant = ifelse(`p adj` < alpha, "Yes", "No")
+      )
+    
+    return(tukey_df)
+  } else {
+    return(NULL)
+  }
+}
+
+# Perform ANOVA and post-hoc tests for each variable
+anova_resident_time <- perform_anova(cons.data, "resident.time")
+anova_total_time <- perform_anova(cons.data, "total.time")
+anova_staff_time <- perform_anova(cons.data, "staff.time")
+
+# Combine the results into one dataframe
+final_anova_results <- bind_rows(
+  anova_resident_time %>% mutate(variable = "resident.time"),
+  anova_total_time %>% mutate(variable = "total.time"),
+  anova_staff_time %>% mutate(variable = "staff.time")
+)
+
+# Filter for significant results
+final_anova_results <- final_anova_results %>% filter(significant == "Yes")
 
 
 
