@@ -807,7 +807,16 @@ filtered_data <- all_data_9 %>%
   group_by(noteid) %>%
   filter(!all(is.na(pgy))) %>%
   ungroup()
-    
+
+# Columns to be deleted
+cols_to_delete <- c("birthdate", "day", "editstart", "editstop", 
+                    "noteauthorlogindept", "noteauthornpi", "noteduration(physician)", 
+                    "noteduration(resident)", "shift", "specialtyatnote", 
+                    "specialtycurrent", "timediff(hr)")
+
+# Delete specified columns
+filtered_data <- filtered_data %>% select(-all_of(cols_to_delete))
+
   cons.data <- filtered_data %>%
     group_by(noteid) %>%
     summarise(
@@ -818,6 +827,10 @@ filtered_data <- all_data_9 %>%
       across(everything(), first),
       .groups = "drop"
     )
+  
+  cons.data <- cons.data %>%
+  mutate(pm = ifelse(encountercontext != "Inpatient" & pm == 0, NA, pm),
+         after.hours = ifelse(encountercontext != "Ambulatory" & after.hours == 0, NA, after.hours))
   
 # 2- attendings file (consolidated by ID, all attending edits for each note combined), delete unneeded columns
   staff.data <- filtered_data %>%
@@ -861,6 +874,10 @@ filtered_data <- all_data_9 %>%
       .groups = "drop"
     )
   
+  per.resident <- per.resident %>%
+  mutate(pm = ifelse(encountercontext != "Inpatient" & pm == 0, NA, pm),
+         after.hours = ifelse(encountercontext != "Ambulatory" & after.hours == 0, NA, after.hours))
+  
 # Summary statement
 summary_messages <- c(
   paste("At the beginning, there were", nrow(all_data_1), "notes. Out of these, notes with equal or incomplete edit time data counted", nrow(not_equal), "and", nrow(no_times), ", respectively.", na_count, "notes had incorrect times to calculate a start-to-stop value. The file was then separated for each edit instance resulting in", nrow(all_data_3), "instances, of which", nrow(all_data_8) - nrow(all_data_9), "were removed because these lasted <5 seconds and were not attending edits or lasted <1 second and were attending edits, or contained 0 characters.", nrow(before) + nrow(after), "editing instances were removed because they occurred before 7/1/21 or after 6/30/24. Further", nrow(all_data_9) - nrow(filtered_data), "editing instances were removed since there were no true resident contributions to the associated notes. The final note count after refinements is", nrow(cons.data), "meaning that", (nrow(all_data_2) - nrow(cons.data)), "notes were excluded while editing instances were refined."),
@@ -884,15 +901,6 @@ saveRDS(summary_messages, file = "summary_messages.rds")
 # read the main file
 cons.data <- readRDS("cons_data.rds")
 k = sum_df(cons.data)
-
-# Columns to be deleted
-cols_to_delete <- c("birthdate", "author", "day", "editstart", "editstop", "edittime(seconds)", 
-                    "noteauthorlogindept", "noteauthornpi", "noteduration(physician)", 
-                    "noteduration(resident)", "shift", "specialtyatnote", 
-                    "specialtycurrent", "timediff(hr)")
-
-# Delete specified columns
-cons.data <- cons.data %>% select(-all_of(cols_to_delete))
 
 # Create a new column "other.time"
 cons.data <- cons.data %>%
@@ -1087,20 +1095,21 @@ cons.data <- readRDS("cons_data.rds")
 cons.data <- cons.data %>%
   mutate(smart_phrases_count = str_count(smartphraseids, "\\["))  # Count "[" in smartphraseids
 
+# Create a new column "other.time"
+cons.data <- cons.data %>%
+  mutate(other.time = total.time - staff.time - resident.time)
+
 # Applying log transformation to the predictors
 cons.data <- cons.data %>%
-  mutate_at(vars(`%copied`, `%voice`, smart_phrases_count, weekend, pm, notesize, total.time,
-                 resident.time, staff.time, iteration, starttostop, sources),
+  mutate_at(vars(weekend, pm, notesize, total.time, after.hours, resident.time, staff.time, other.time, starttostop),
             ~ log1p(.))  # log1p is used to apply log(1 + x) to avoid log(0)
 
 # Select relevant columns
 selected_data <- cons.data %>%
-  select(total.time, `%copied`, `%voice`, smart_phrases_count, weekend,
-         pm, notesize, resident.time, staff.time, iteration, starttostop,
-         sources, resident.percent)
+  select(total.time, `%copied`, `%voice`, weekend, pm, notesize, resident.time, staff.time, other.time, starttostop, resident.percent, after.hours)
 
 # Calculate correlation matrix
-correlation_matrix <- cor(selected_data, method = "pearson", use = "complete.obs")  # Handles missing values by listwise deletion
+correlation_matrix <- cor(selected_data, method = "pearson", use = "pairwise.complete.obs")  # Handles missing values by listwise deletion
 
 print(correlation_matrix)
 
@@ -1122,8 +1131,8 @@ ggsave("xx.png", plot = x, width = 14, height = 12)
 sampled_data <- selected_data[sample(nrow(selected_data), size = 0.1 * nrow(selected_data)),]
 
 # Creating the matrix of scatter plots with slope lines in the lower triangle
-c <- ggpairs(sampled_data,
-             columns = c("total.time", "%copied", "%voice", "weekend", "pm", "notesize", "resident.time", "staff.time", "starttostop", "resident.percent"),
+c <- ggpairs(selected_data,
+             columns = c("total.time", "%copied", "%voice", "weekend", "pm", "notesize", "resident.time", "staff.time", "starttostop", "resident.percent", "after.hours", "other.time"),
              lower = list(continuous = function(data, mapping, ...) {
                  ggplot(data = data, mapping = mapping) + 
                      geom_point(color = "blue") +
