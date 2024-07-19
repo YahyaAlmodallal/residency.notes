@@ -1085,12 +1085,17 @@ cons.data <- readRDS("cons_data.rds")
 
 # Calculate the logarithm of total time
 cons.data <- cons.data %>%
-  mutate(log_total_time = log(total.time + 1),  # Adding 1 to avoid log(0) if any zeros exist
-         smart_phrases_count = str_count(smartphraseids, "\\["))  # Count "[" in smartphraseids
+  mutate(smart_phrases_count = str_count(smartphraseids, "\\["))  # Count "[" in smartphraseids
+
+# Applying log transformation to the predictors
+cons.data <- cons.data %>%
+  mutate_at(vars(`%copied`, `%voice`, smart_phrases_count, weekend, pm, notesize, total.time,
+                 resident.time, staff.time, iteration, starttostop, sources),
+            ~ log1p(.))  # log1p is used to apply log(1 + x) to avoid log(0)
 
 # Select relevant columns
 selected_data <- cons.data %>%
-  select(log_total_time, `%copied`, `%voice`, smart_phrases_count, weekend,
+  select(total.time, `%copied`, `%voice`, smart_phrases_count, weekend,
          pm, notesize, resident.time, staff.time, iteration, starttostop,
          sources, resident.percent)
 
@@ -1116,35 +1121,24 @@ ggsave("xx.png", plot = x, width = 14, height = 12)
 # Sampling a subset of the data, for example 10% of the rows
 sampled_data <- selected_data[sample(nrow(selected_data), size = 0.1 * nrow(selected_data)),]
 
-# Create matrix of scatter plots with sampled data
-c = ggpairs(sampled_data, 
-        columns = c("log_total_time", "%copied", "%voice", "smart_phrases_count", "weekend",
-                    "pm", "notesize", "resident.time", "staff.time", "iteration", "starttostop",
-                    "sources", "resident.percent"),
-        lower = list(continuous = "points"), 
-        upper = list(continuous = "cor"),
-        diag = list(continuous = "barDiag"))
+# Creating the matrix of scatter plots with slope lines in the lower triangle
+c <- ggpairs(sampled_data,
+             columns = c("total.time", "%copied", "%voice", "weekend", "pm", "notesize", "resident.time", "staff.time", "starttostop", "resident.percent"),
+             lower = list(continuous = function(data, mapping, ...) {
+                 ggplot(data = data, mapping = mapping) + 
+                     geom_point(color = "blue") +
+                     geom_smooth(method = "lm", color = "red", se = FALSE)
+             }),
+             upper = list(continuous = "cor"),
+             diag = list(continuous = "barDiag"))
+
+# Viewing the plot (if needed)
+print(c)
+
+# Saving the plot
 ggsave("cc.png", plot = c, width = 14, height = 12)
 
 
-# Function to calculate correlation for bootstrapping
-correlation_function <- function(data, indices) {
-  d <- data[indices,]  # allows bootstrapping to sample with replacement
-  cor(d[[1]], d[[2]], use = "complete.obs")  # Calculates correlation
-}
-
-
-# Fitting the model
-model <- lm(total.time ~ `%copied` + `%voice` + smart_phrases_count + weekend + pm + 
-            notesize + resident.time + staff.time + iteration + starttostop + 
-            sources + resident.percent, data = cons.data)
-
-# Summarizing the model
-summary(model)
-
-# Plotting residuals
-par(mfrow=c(2,2))
-plot(model)
 
 
 ```
