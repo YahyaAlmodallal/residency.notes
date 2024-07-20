@@ -67,6 +67,11 @@ library(reshape2)
 library(GGally)
 library(boot)
 library(car)
+library(ggpubr)
+library(DescTools)
+library(multcomp)
+library(rstatix)
+library(broom)
 conflict_prefer("select", "dplyr")
 conflicts_prefer(dplyr::filter)  # Set conflict resolution preferences
 
@@ -354,6 +359,68 @@ create_melted_plot <- function(data, columns, title, x_label, y_label) {
     theme(axis.text.x = element_text(angle = 45, hjust = 1),
           legend.position = "none")
 }
+
+
+
+perform_analysis <- function(df, cont_var, cat_var) {
+  # Ensure there are no zeros or negative values in the continuous variable
+  df <- df %>%
+  select(!!sym(cat_var), !!sym(cont_var)) %>%
+  mutate(!!sym(cont_var) := ifelse(!!sym(cont_var) <= 0, NA, !!sym(cont_var))) %>%
+  filter(!is.na(!!sym(cont_var))) %>%
+  mutate(log_transformed = log(!!sym(cont_var)))
+
+  # Descriptive statistics on log-transformed data
+  descriptive_stats <- df %>%
+    group_by(!!sym(cat_var)) %>%
+    summarise(
+      Count_Non_NA = n(),
+      Real_Mean = exp(mean(log_transformed, na.rm = TRUE)),
+      sd = exp(sd(log_transformed, na.rm = TRUE)),
+      N = sum(!is.na(log_transformed)),
+      sd_log = sd(log_transformed, na.rm = TRUE),
+      SE = exp(sd_log) / sqrt(N),
+      ci_lower = exp(mean(log_transformed, na.rm = TRUE) - qt(0.975, df = n() - 1) * sd_log / sqrt(N)),
+      ci_upper = exp(mean(log_transformed, na.rm = TRUE) + qt(0.975, df = n() - 1) * sd_log / sqrt(N)),
+      .groups = 'drop'
+    )
+
+  # Filter data for groups that have at least 2 observations
+  df <- df %>%
+    group_by(!!sym(cat_var)) %>%
+    filter(n() >= 2) %>%
+    ungroup()
+
+  # Create formula for ANOVA
+  anova_formula <- as.formula(paste("log_transformed ~", cat_var))
+
+  # Welch's ANOVA on log-transformed data
+  if (nrow(df) > 1) {
+    anova_results <- df %>%
+      welch_anova_test(anova_formula)
+    } 
+
+  # Create formula for Games-Howell test
+  posthoc_formula <- as.formula(paste("log_transformed ~", cat_var))
+
+  # Games-Howell post-hoc test on log-transformed data
+  post_hoc_results <- df %>%
+    games_howell_test(posthoc_formula)
+
+  # Merge to add Real Means
+  post_hoc_results <- post_hoc_results %>%
+    left_join(descriptive_stats %>% select(!!sym(cat_var), N, Real_Mean1 = Real_Mean), by = c("group1" = cat_var)) %>%
+    left_join(descriptive_stats %>% select(!!sym(cat_var), Real_Mean2 = Real_Mean), by = c("group2" = cat_var)) %>%
+    mutate(
+      Mean_Difference = Real_Mean2 - Real_Mean1,
+      Estimated_Real_Mean2 = Real_Mean1 * exp(estimate),
+      CI_Real_Mean2_Lower = Real_Mean1 * exp(conf.low),
+      CI_Real_Mean2_Upper = Real_Mean1 * exp(conf.high)
+    )
+
+  return(post_hoc_results)
+}
+
 
 ```
 
@@ -925,11 +992,12 @@ create_and_save_numeric_plots(cons.data, "numeric_plot")
 #Given the very large number of measurements in the dataset, the data, untransformed, vs the data after several different transformations was tested as to whether it meets the central limit theorem (CLT, i.e. 1000 samples, each of 500 measurements - reflecting the large subsets we would work with - were taken and the means were QQ plotted and tested for normality using the Anderson-Darling normality and Shapiro-Walk normality tests). This was done to the 9 numeric variables below and the log transformation, with its ease of use, was thought to be the best transformation to use as all the transformed variables met normality estimate and therefore the CLT was assumed to apply for each.
 
 # Define the columns to be analyzed
-columns <- c("total.time", "resident.time", "staff.time", "other.time", "notesize", "%copied", "%voice", "starttostop", "smartphraseids", "resident.percent")
+columns <- c("total.time", "resident.time", "staff.time", "other.time", "notesize", "%copied", "%voice", "starttostop", "smartphraseids", "resident.percent", "pm", "weekend", "after.hours")
 
 # Perform analysis (results is a dataframe with normality test results for each transformation and each column)
 results <- analyze_transformations(cons.data, columns)
 #print(results)
+
 
 # Filter and summarize data for each note type
 plot_data <- cons.data %>%
@@ -966,6 +1034,24 @@ plot_filetime <- ggplot(plot_data_filetime, aes(x = month, y = mean_time, color 
 
 # Save the plot to working directory
 ggsave("plot_filetime.png", plot = plot_filetime, width = 10, height = 6, dpi = 300)
+
+```
+
+
+```{r, studying variances}
+
+# If car package is not installed, install it first
+# install.packages("car")
+library(car)
+
+# Assuming `notestatus` is the grouping variable
+leveneTest(cons.data$total.time, cons.data$pgy, center = median)
+
+
+# Bartlett's test with `notestatus` as the grouping factor
+bartlett.test(cons.data$total.time, cons.data$pgy)
+
+
 
 ```
 
@@ -1079,19 +1165,20 @@ cons.data <- cons.data %>%
   mutate(outside.work.hours = coalesce(pm, after.hours)) %>%
   
   # Apply log1p transformation to multiple variables
-  mutate_at(vars(outside.work.hours, notesize, total.time, weekend, 
-                 resident.time, staff.time, other.time, starttostop),
+  mutate_at(vars(outside.work.hours, staff.time, other.time, starttostop, smart_phrases_count),
             ~ log1p(.))  # log1p to handle zeros by transforming log(1 + x)
 
 # Select relevant columns for further analysis
 selected_data <- cons.data %>%
-  select(total.time, `%copied`, `%voice`, outside.work.hours, notesize, 
+  select(total.time, `%copied`, `%voice`, outside.work.hours, notesize, smart_phrases_count,
          resident.time, staff.time, other.time, starttostop, resident.percent, weekend)
 
 # Calculate correlation matrix
 correlation_matrix <- cor(selected_data, method = "pearson", use = "complete.obs")  # Handles missing values by listwise deletion
 
 print(correlation_matrix)
+
+write.csv(correlation_matrix, "correlation_matrix.csv")
 
 # Melting the correlation matrix into a long format
 melted_corr_matrix <- melt(correlation_matrix)
@@ -1118,9 +1205,6 @@ c <- ggpairs(selected_data,
              upper = list(continuous = "cor"),
              diag = list(continuous = "barDiag"))
 
-# Viewing the plot (if needed)
-print(c)
-
 # Saving the plot
 ggsave("cc.png", plot = c, width = 14, height = 12)
 
@@ -1128,134 +1212,420 @@ ggsave("cc.png", plot = c, width = 14, height = 12)
 ```
 
 
-```{r, comparisons}
+```{r, note time by note type and contributor, echo=FALSE}
 
 cons.data <- readRDS("cons_data.rds")
 
-# Create a new column "other.time"
-cons.data <- cons.data %>%
-  mutate(other.time = total.time - staff.time - resident.time)
+# Create a table of note types
+note_type_table <- table(cons.data$notetype)
 
-calc_pairwise_stats <- function(data, variable, min_obs = 2) {
-  data <- data %>%
-    mutate(log_value = log(.data[[variable]]))
-  
-  summary_stats <- data %>%
-    group_by(notetype) %>%
-    summarize(
-      mean = mean(log_value, na.rm = TRUE),
-      sd = sd(log_value, na.rm = TRUE),
-      ci_lower = mean(log_value, na.rm = TRUE) - qt(0.975, df = n() - 1) * sd(log_value, na.rm = TRUE) / sqrt(n()),
-      ci_upper = mean(log_value, na.rm = TRUE) + qt(0.975, df = n() - 1) * sd(log_value, na.rm = TRUE) / sqrt(n()),
-      n = n(),
-      .groups = 'drop'
-    ) %>%
-    filter(n >= min_obs)
-  
-  notetypes <- summary_stats$notetype
-  
-  pairwise_results <- do.call(rbind, lapply(notetypes, function(type1) {
-    do.call(rbind, lapply(notetypes, function(type2) {
-      if (type1 != type2) {
-        group1 <- data %>% filter(notetype == type1) %>% pull(log_value)
-        group2 <- data %>% filter(notetype == type2) %>% pull(log_value)
-        
-        if (length(group1) >= min_obs && length(group2) >= min_obs) {
-          t_test <- tryCatch(t.test(group1, group2), error = function(e) NULL)
-          
-          if (!is.null(t_test)) {
-            mean.group1 <- mean(group1, na.rm = TRUE)
-            sd.group1 <- sd(group1, na.rm = TRUE)
-            ci_lower.group1 <- mean.group1 - qt(0.975, df = length(group1) - 1) * sd.group1 / sqrt(length(group1))
-            ci_upper.group1 <- mean.group1 + qt(0.975, df = length(group1) - 1) * sd.group1 / sqrt(length(group1))
-            
-            mean.group2 <- mean(group2, na.rm = TRUE)
-            sd.group2 <- sd(group2, na.rm = TRUE)
-            ci_lower.group2 <- mean.group2 - qt(0.975, df = length(group2) - 1) * sd.group2 / sqrt(length(group2))
-            ci_upper.group2 <- mean.group2 + qt(0.975, df = length(group2) - 1) * sd.group2 / sqrt(length(group2))
-            
-            data.frame(
-              group1 = type1,
-              group2 = type2,
-              mean.group1 = exp(mean.group1),
-              sd.group1 = exp(sd.group1),
-              ci_lower.group1 = exp(ci_lower.group1),
-              ci_upper.group1 = exp(ci_upper.group1),
-              mean.group2 = exp(mean.group2),
-              sd.group2 = exp(sd.group2),
-              ci_lower.group2 = exp(ci_lower.group2),
-              ci_upper.group2 = exp(ci_upper.group2),
-              p.value = t_test$p.value
-            )
-          } else {
-            NULL
-          }
-        } else {
-          NULL
-        }
-      } else {
-        NULL
-      }
-    }))
-  }))
-  
-  return(pairwise_results)
-}
-
-# Perform the pairwise comparison for each variable with minimum observation threshold
-pairwise_stats_resident_time <- calc_pairwise_stats(cons.data, "resident.time")
-pairwise_stats_total_time <- calc_pairwise_stats(cons.data, "total.time")
-pairwise_stats_staff_time <- calc_pairwise_stats(cons.data, "staff.time")
-
-# Combine the results into one dataframe
-final_pairwise_results <- bind_rows(
-  pairwise_stats_resident_time %>% mutate(variable = "resident.time"),
-  pairwise_stats_total_time %>% mutate(variable = "total.time"),
-  pairwise_stats_staff_time %>% mutate(variable = "staff.time")
-) %>%
-  select(variable, group1, group2, mean.group1, sd.group1, ci_lower.group1, ci_upper.group1,
-         mean.group2, sd.group2, ci_lower.group2, ci_upper.group2, p.value)
-
-
-
-# Perform ANOVA and post-hoc pairwise comparisons
-perform_anova <- function(data, variable) {
-  data <- data %>%
-    mutate(log_value = log(.data[[variable]]))
-  
-  # Perform ANOVA
-  anova_result <- aov(log_value ~ notetype, data = data)
-  anova_summary <- summary(anova_result)
-  
-  # Perform Tukey's HSD post-hoc test if ANOVA is significant
-  if (anova_summary[[1]]$`Pr(>F)`[1] < 0.05) {
-    tukey_result <- TukeyHSD(anova_result)
-    tukey_df <- as.data.frame(tukey_result$notetype) %>%
-      rownames_to_column("comparison") %>%
-      separate(comparison, into = c("group1", "group2"), sep = "-")
-    
-    return(tukey_df)
-  } else {
-    return(NULL)
-  }
-}
-
-# Perform ANOVA and post-hoc tests for each variable
-anova_resident_time <- perform_anova(cons.data, "resident.time")
-anova_total_time <- perform_anova(cons.data, "total.time")
-anova_staff_time <- perform_anova(cons.data, "staff.time")
-
-# Combine the results into one dataframe
-final_anova_results <- bind_rows(
-  anova_resident_time %>% mutate(variable = "resident.time"),
-  anova_total_time %>% mutate(variable = "total.time"),
-  anova_staff_time %>% mutate(variable = "staff.time")
+# Convert the table to a dataframe
+typecounts <- data.frame(
+  NoteType = names(note_type_table),
+  Counts = as.integer(note_type_table)
 )
 
-# Join the p-value column from final_anova_results to final_pairwise_results
-final_combined_results <- final_pairwise_results %>%
-  left_join(final_anova_results %>% select(group1, group2, variable, `p adj`), 
-            by = c("group1", "group2", "variable"))
+# Sort the dataframe by counts in descending order and keep the top 10
+typecounts <- typecounts[order(-typecounts$Counts), ]
+typecounts <- head(typecounts, 10)
+
+# Extract the NoteType column to create a character vector of allowed note types
+allowed_notetypes <- as.character(typecounts$NoteType)
+
+# Define the list of combinations to analyze
+combinations <- list(
+  list(cont_var = "resident.time", cat_var = "notetype"),
+  list(cont_var = "total.time", cat_var = "notetype"),
+  list(cont_var = "staff.time", cat_var = "notetype")
+)
+
+# Apply the perform_analysis function to each combination
+results <- lapply(combinations, function(combo) {
+  df <- cons.data  # Ensure cons.data is the dataframe you want to analyze
+  tryCatch({
+    result <- perform_analysis(df, combo$cont_var, combo$cat_var)
+    list(variable = combo$cont_var, category = combo$cat_var, data = result)
+  }, error = function(e) {
+    message("Error processing ", combo$cont_var, " by ", combo$cat_var, ": ", e$message)
+    NULL  # Returning NULL in case of error to keep the results clean
+  })
+})
+
+# Assuming 'results' is your list of lists
+combined_df <- bind_rows(
+  lapply(results, function(x) {
+    data <- x$data
+    data$variable <- x$variable
+    data$category <- x$category
+    return(data)
+  }),
+  .id = "source_id"  # This optional line adds an ID for each source data frame
+)
+
+modified_df <- combined_df %>%
+  select(variable, group2, group1, N, Real_Mean2, CI_Real_Mean2_Lower, CI_Real_Mean2_Upper, p.adj, p.adj.signif) %>%
+  distinct()
+
+# Filter rows where 'group2' is in the allowed notetypes
+filtered_df <- modified_df %>%
+  filter(group2 %in% allowed_notetypes)
+
+# Adjusting the time units from seconds to minutes for 'Real_Mean2' and CI bounds
+result_df <- filtered_df %>%
+  group_by(group2, variable) %>%
+  mutate(Real_Mean2 = Real_Mean2 / 60,
+         CI_Real_Mean2_Lower = CI_Real_Mean2_Lower / 60,
+         CI_Real_Mean2_Upper = CI_Real_Mean2_Upper / 60) %>%
+  slice_min(order_by = CI_Real_Mean2_Upper - CI_Real_Mean2_Lower) %>%
+  ungroup()
+
+# Renaming the variables for clarity
+result_df$variable <- dplyr::recode(result_df$variable,
+                             "resident.time" = "Resident",
+                             "staff.time" = "Attending",
+                             "total.time" = "Overall")
+
+# Create a new label that combines note type and count
+typecounts$Label <- paste(typecounts$NoteType, " (", typecounts$Counts, ")", sep="")
+
+# Sort 'typecounts' by 'Counts' in descending order
+typecounts <- typecounts[order(-typecounts$Counts), ]
+
+# Merge this label with the result_df dataframe based on NoteType
+result_df <- merge(result_df, typecounts, by.x="group2", by.y="NoteType")
+
+# Set the factor levels for 'Label' in 'result_df' based on the order in 'typecounts'
+result_df$Label <- factor(result_df$Label, levels = typecounts$Label)
+
+# Update the plotting code to use the new labels with ordered levels
+g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
+  geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
+  geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
+                position = position_dodge(width = 0.5), width = 0.1) +
+  labs(title = "Whisker Plot of Average Note Time by Author's type & Note Type",
+       x = "Note Type (Count)",
+       y = "Average Time (min)",
+       color = "Author's Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+print(g1)
+ggsave("figure2.png", plot = g2, width = 10, height = 8)
+
+
+
+### NOW MAKE GRAPHS (WHISKER PLOTS) FOR EACH GROUP OF DATA: note type, authors service, PGY, CCAs, collapsible
+
+```
+
+
+```{r, note time by service and contributor, echo=FALSE}
+
+cons.data <- readRDS("cons_data.rds")
+
+# Recode specific labels in 'result_df$Label'
+cons.data$authorsservice <- dplyr::recode(cons.data$authorsservice,
+                          "Critical Care PICU" = "PICU",
+                          "Critical Care NICU" = "NICU",
+                          "Center for Disabilities and Development" = "CDD")
+
+# Create a table of note services
+service_table <- table(cons.data$authorsservice)
+
+# Convert the table to a dataframe
+servicecounts <- data.frame(
+  NoteService = names(service_table),
+  Counts = as.integer(service_table)
+)
+
+# Sort the dataframe by counts in descending order and keep the top 10
+servicecounts <- servicecounts[order(-servicecounts$Counts), ]
+servicecounts <- head(servicecounts, 14)
+
+# Extract the NoteType column to create a character vector of allowed note types
+allowed_noteservice <- as.character(servicecounts$NoteService)
+
+# Define the list of combinations to analyze
+combinations <- list(
+  list(cont_var = "resident.time", cat_var = "authorsservice"),
+  list(cont_var = "total.time", cat_var = "authorsservice"),
+  list(cont_var = "staff.time", cat_var = "authorsservice")
+)
+
+# Apply the perform_analysis function to each combination
+results <- lapply(combinations, function(combo) {
+  df <- cons.data  # Ensure cons.data is the dataframe you want to analyze
+  tryCatch({
+    result <- perform_analysis(df, combo$cont_var, combo$cat_var)
+    list(variable = combo$cont_var, category = combo$cat_var, data = result)
+  }, error = function(e) {
+    message("Error processing ", combo$cont_var, " by ", combo$cat_var, ": ", e$message)
+    NULL  # Returning NULL in case of error to keep the results clean
+  })
+})
+
+# Assuming 'results' is your list of lists
+combined_df <- bind_rows(
+  lapply(results, function(x) {
+    data <- x$data
+    data$variable <- x$variable
+    data$category <- x$category
+    return(data)
+  }),
+  .id = "source_id"  # This optional line adds an ID for each source data frame
+)
+
+modified_df <- combined_df %>%
+  select(variable, group2, group1, N, Real_Mean2, CI_Real_Mean2_Lower, CI_Real_Mean2_Upper, p.adj, p.adj.signif) %>%
+  distinct()
+
+# Filter rows where 'group2' is in the allowed author services
+filtered_df <- modified_df %>%
+  filter(group2 %in% allowed_noteservice)
+
+# Adjusting the time units from seconds to minutes for 'Real_Mean2' and CI bounds
+result_df <- filtered_df %>%
+  group_by(group2, variable) %>%
+  mutate(Real_Mean2 = Real_Mean2 / 60,
+         CI_Real_Mean2_Lower = CI_Real_Mean2_Lower / 60,
+         CI_Real_Mean2_Upper = CI_Real_Mean2_Upper / 60) %>%
+  slice_min(order_by = CI_Real_Mean2_Upper - CI_Real_Mean2_Lower) %>%
+  ungroup()
+
+# Renaming the variables for clarity
+result_df$variable <- dplyr::recode(result_df$variable,
+                             "resident.time" = "Resident",
+                             "staff.time" = "Attending",
+                             "total.time" = "Overall")
+
+# Create a new label that combines note type and count
+servicecounts$Label <- paste(servicecounts$NoteService, " (", servicecounts$Counts, ")", sep="")
+
+# Sort 'typecounts' by 'Counts' in descending order
+servicecounts <- servicecounts[order(-servicecounts$Counts), ]
+
+# Merge this label with the result_df dataframe based on NoteType
+result_df <- merge(result_df, servicecounts, by.x="group2", by.y="NoteService")
+
+# Set the factor levels for 'Label' in 'result_df' based on the order in 'typecounts'
+result_df$Label <- factor(result_df$Label, levels = servicecounts$Label)
+
+# Update the plotting code to use the new labels with ordered levels
+g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
+  geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
+  geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
+                position = position_dodge(width = 0.5), width = 0.1) +
+  labs(title = "Whisker Plot of Average Note Time by Author's type & Author's Service",
+       x = "Author's Service (Count)",
+       y = "Average Time (min)",
+       color = "Author's type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+print(g3)
+ggsave("figure3.png", plot = g3, width = 10, height = 8)
+
+```
+
+
+```{r, resident note time by class and year}
+
+per.resident <- readRDS("per.resident.rds")
+
+# Recode specific labels in pgy
+per.resident$pgy <- dplyr::recode(per.resident$pgy,
+                          "pgy1.21.22" = "PGY-1, FY 21-22",
+                          "pgy1.22.23" = "PGY-1, FY 22-23",
+                          "pgy1.23.24" = "PGY-1, FY 23-24",
+                          "pgy2.21.22" = "PGY-2, FY 21-22",
+                          "pgy2.22.23" = "PGY-2, FY 22-23",
+                          "pgy2.23.24" = "PGY-2, FY 23-24",
+                          "pgy3.21.22" = "PGY-3, FY 21-22",
+                          "pgy3.22.23" = "PGY-3, FY 22-23",
+                          "pgy3.23.24" = "PGY-3, FY 23-24")
+
+# Create a table of note services
+pgy_table <- table(per.resident$pgy)
+
+# Convert the table to a dataframe
+pgycounts <- data.frame(
+  pgy = names(pgy_table),
+  Counts = as.integer(pgy_table)
+)
+
+# Sort the dataframe by counts in descending order and keep the top 10
+pgycounts <- pgycounts[order(pgycounts$pgy), ]
+pgycounts <- head(pgycounts, 10)
+
+# Extract the NoteType column to create a character vector of allowed note types
+allowed_pgy <- as.character(pgycounts$pgy)
+
+# Define the list of combinations to analyze
+combinations <- list(
+  list(cont_var = "resident.time", cat_var = "pgy")
+)
+
+  per.resident <- per.resident %>%
+  select(notetype, other.time) %>%
+  mutate(other.time := ifelse(other.time <= 0, NA, other.time)) %>%
+  filter(!is.na(other.time)) %>%
+  mutate(log_transformed = log(other.time))
+
+  # Descriptive statistics on log-transformed data
+  descriptive_stats <- cons.data %>%
+    group_by(notetype) %>%
+    summarise(
+      Count_Non_NA = n(),
+      Real_Mean = exp(mean(log_transformed, na.rm = TRUE)),
+      sd = exp(sd(log_transformed, na.rm = TRUE)),
+      N = sum(!is.na(log_transformed)),
+      sd_log = sd(log_transformed, na.rm = TRUE),
+      SE = exp(sd_log) / sqrt(N),
+      ci_lower = exp(mean(log_transformed, na.rm = TRUE) - qt(0.975, df = N - 1) * sd_log / sqrt(N)),
+      ci_upper = exp(mean(log_transformed, na.rm = TRUE) + qt(0.975, df = N - 1) * sd_log / sqrt(N)),
+      .groups = 'drop'
+    )
+
+# Filter data for groups that have at least 2 observations
+  cons.data <- cons.data %>%
+    group_by(notetype) %>%
+    filter(n() >= 2) %>%
+    ungroup()
+
+  # Welch's ANOVA on log-transformed data
+  if (nrow(cons.data) > 1) {
+    anova_results <- cons.data %>%
+      welch_anova_test(log_transformed ~ notetype)
+    } 
+
+  # Games-Howell post-hoc test on log-transformed data
+  post_hoc_results <- cons.data %>%
+    games_howell_test(log_transformed ~ notetype)
+
+  # Merge to add Real Means
+  post_hoc_results <- post_hoc_results %>%
+    left_join(descriptive_stats %>% select(notetype, N, Real_Mean1 = Real_Mean), by = c("group1" = "notetype")) %>%
+    left_join(descriptive_stats %>% select(notetype, Real_Mean2 = Real_Mean), by = c("group2" = "notetype")) %>%
+    mutate(
+      Mean_Difference = Real_Mean2 - Real_Mean1,
+      Estimated_Real_Mean2 = Real_Mean1 * exp(estimate),
+      CI_Real_Mean2_Lower = Real_Mean1 * exp(conf.low),
+      CI_Real_Mean2_Upper = Real_Mean1 * exp(conf.high)
+    )
+
+
+modified_df <- post_hoc_results %>%
+  select(variable, group2, group1, N, Real_Mean2, CI_Real_Mean2_Lower, CI_Real_Mean2_Upper, p.adj, p.adj.signif) %>%
+  distinct()
+
+# Filter rows where 'group2' is in the allowed author services
+filtered_df <- modified_df %>%
+  filter(group2 %in% allowed_pgy)
+
+# Adjusting the time units from seconds to minutes for 'Real_Mean2' and CI bounds
+result_df <- filtered_df %>%
+  group_by(group2, variable) %>%
+  mutate(Real_Mean2 = Real_Mean2 / 60,
+         CI_Real_Mean2_Lower = CI_Real_Mean2_Lower / 60,
+         CI_Real_Mean2_Upper = CI_Real_Mean2_Upper / 60) %>%
+  slice_min(order_by = CI_Real_Mean2_Upper - CI_Real_Mean2_Lower) %>%
+  ungroup()
+
+# Renaming the variables for clarity
+result_df$variable <- dplyr::recode(result_df$variable,
+                             "resident.time" = "Resident")
+
+# Create a new label that combines note type and count
+pgycounts$Label <- paste(pgycounts$pgy, " (", pgycounts$Counts, ")", sep="")
+
+# Sort 'typecounts' by 'Counts' in descending order
+pgycounts <- pgycounts[order(-pgycounts$Counts), ]
+
+# Merge this label with the result_df dataframe based on NoteType
+result_df <- merge(result_df, pgycounts, by.x="group2", by.y="pgy")
+
+# Set the factor levels for 'Label' in 'result_df' based on the order in 'typecounts'
+result_df$Label <- factor(result_df$Label, levels = pgycounts$Label)
+
+# Update the plotting code to use the new labels with ordered levels
+g4 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
+  geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
+  geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
+                position = position_dodge(width = 0.5), width = 0.1) +
+  labs(title = "Whisker Plot of Average Note Time by Author's type & Author's Service",
+       x = "Author's Service (Count)",
+       y = "Average Time (min)",
+       color = "Author's type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+print(g4)
+ggsave("figure4.png", plot = g4, width = 10, height = 8)
+
+### NOW MAKE GRAPHS (WHISKER PLOTS) FOR EACH GROUP OF DATA: note type, authors service, PGY, CCAs, collapsible
+
+
+```
+
+```{r}
+
+library(dplyr)
+library(rstatix)
+
+# Data preprocessing
+per.resident <- per.resident %>%
+  select(notetype, pgy, resident.time) %>%
+  mutate(resident.time = ifelse(resident.time <= 0, NA, resident.time)) %>%
+  filter(!is.na(resident.time)) %>%
+  mutate(log_transformed = log(resident.time))
+
+# Create an interaction term
+per.resident <- per.resident %>%
+  mutate(notetype_pgy = interaction(notetype, pgy))
+
+# Descriptive statistics on log-transformed data
+descriptive_stats <- per.resident %>%
+  group_by(notetype, pgy) %>%
+  summarise(
+    Count_Non_NA = n(),
+    Real_Mean = exp(mean(log_transformed, na.rm = TRUE)),
+    sd = exp(sd(log_transformed, na.rm = TRUE)),
+    N = sum(!is.na(log_transformed)),
+    sd_log = sd(log_transformed, na.rm = TRUE),
+    SE = exp(sd_log) / sqrt(N),
+    ci_lower = exp(mean(log_transformed, na.rm = TRUE) - qt(0.975, df = N - 1) * sd_log / sqrt(N)),
+    ci_upper = exp(mean(log_transformed, na.rm = TRUE) + qt(0.975, df = N - 1) * sd_log / sqrt(N)),
+    .groups = 'drop'
+  )
+
+# Filter data for groups that have at least 2 observations
+per.resident <- per.resident %>%
+  group_by(notetype, pgy) %>%
+  filter(n() >= 2) %>%
+  ungroup()
+
+# Two-way Welch's ANOVA on log-transformed data
+if (nrow(per.resident) > 1) {
+  anova_results <- welch_anova_test(per.resident, log_transformed ~ notetype * pgy)
+}
+
+# Games-Howell post-hoc test on log-transformed data
+post_hoc_results <- per.resident %>%
+  games_howell_test(log_transformed ~ notetype_pgy)
+
+post_hoc_results <- post_hoc_results %>%
+  separate(group2, into = c("notetype_split", "pgy_split"), sep = "\\.", extra = "merge")
+
+  # Merge to add Real Means
+  post_hoc_results <- post_hoc_results %>%
+    left_join(descriptive_stats %>% select(notetype, N, Real_Mean1 = Real_Mean), by = c("group1" = "notetype")) %>%
+    left_join(descriptive_stats %>% select(notetype, Real_Mean2 = Real_Mean), by = c("group2" = "notetype")) %>%
+    mutate(
+      Mean_Difference = Real_Mean2 - Real_Mean1,
+      Estimated_Real_Mean2 = Real_Mean1 * exp(estimate),
+      CI_Real_Mean2_Lower = Real_Mean1 * exp(conf.low),
+      CI_Real_Mean2_Upper = Real_Mean1 * exp(conf.high)
+    )
 
 ```
 
