@@ -1064,12 +1064,6 @@ ggsave("plot_filetime.png", plot = plot_filetime, width = 10, height = 6, dpi = 
 
 per.resident <- readRDS("per.resident.rds")
 
-# Step 1: Delete the specified columns
-per.resident <- per.resident %>%
-  select(-"birthdate", -"editstart", -"noteduration(physician)", -"noteauthorlogindept", -"noteauthornpi", 
-         -"shift", -"day", -"editstop", -"noteduration(resident)", -"specialtyatnote", -"timediff(hr)", 
-         -"noteauthor", -"edittime(seconds)", -"specialtycurrent")
-
 pgy1 <- per.resident %>%
   filter(pgy %in% c("pgy1.21.22", "pgy1.22.23", "pgy1.23.24"))
 
@@ -1138,21 +1132,6 @@ ggsave("figure.1.individual.variability.png", plot = combined_plot, width = 14, 
 ```
 
 
-```{r, per class and figure 2, echo=FALSE}
-
-all.data <- readRDS("all_data.rds")
-  class <- all.data %>%
-    filter(pgy != "NA")
-
-
-
-
-
-
-
-```
-
-
 ```{r, correlations}
 
 cons.data <- readRDS("cons_data.rds")
@@ -1210,7 +1189,7 @@ c <- ggpairs(selected_data,
              diag = list(continuous = "barDiag"))
 
 # Saving the plot
-ggsave("cc.png", plot = c, width = 14, height = 12)
+ggsave("correlation.matrix.png", plot = c, width = 14, height = 14, dpi = 600, device = "png")
 
 
 ```
@@ -1311,7 +1290,7 @@ result_df$Label <- factor(result_df$Label, levels = typecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
 # # Whisker Plot of Average Note Time by Author's Type & Note Type
-g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
+g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable, shape = variable)) +
   geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
                 position = position_dodge(width = 0.5), width = 0.1) +
@@ -1321,7 +1300,8 @@ g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
   labs(title = "A: Note Type & Author Type",
        x = "Note Type (Count)",
        y = "Average Time (min)",
-       color = "Author Type") +
+       color = "Author Type",
+       shape = "Author Type") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
         axis.title.y = element_text(angle = 90, vjust = 0.5, margin = margin(r = 20, unit = "pt"))) +  # Rotate y-axis label to vertical and add space
@@ -1329,7 +1309,7 @@ g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
 
 print(g2)
 
-ggsave("figure2.png", plot = g2, width = 10, height = 5)
+ggsave("figure2.tiff", plot = g2, width = 10, height = 6, dpi = 600, device = "tiff")
 
 ### NOW MAKE GRAPHS (WHISKER PLOTS) FOR EACH GROUP OF DATA: note type, authors service, PGY, CCAs, collapsible
 
@@ -1436,7 +1416,7 @@ result_df$Label <- factor(result_df$Label, levels = servicecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
 # # Whisker Plot of Average Note Time by Author's type & Author's Service
-g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
+g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable, shape = variable)) +
   geom_point(position = position_dodge(width = 0.5)) +
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
                 position = position_dodge(width = 0.5), width = 0.1) +
@@ -1446,7 +1426,8 @@ g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
   labs(title = "B: Author Type & Service",
        x = "Author Service (Count)",
        y = "Average Time (min)",
-       color = "Author Type") +
+       color = "Author Type",
+       shape = "Author Type") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
         axis.title.y = element_text(angle = 90, vjust = 0.5, margin = margin(r = 20, unit = "pt"))) +  # Rotate y-axis label to vertical and add space
@@ -1454,7 +1435,7 @@ g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
 
 print(g3)
 
-ggsave("figure3.png", plot = g3, width = 10, height = 5)
+ggsave("figure3.tiff", plot = g3, width = 10, height = 5, dpi = 600, device = "tiff")
 
 ### NOW MAKE GRAPHS (WHISKER PLOTS) FOR EACH GROUP OF DATA: note type, authors service, PGY, CCAs, collapsible
 
@@ -1599,7 +1580,7 @@ modified_df$Label <- factor(modified_df$Label, levels = typecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
 # # Whisker Plot of Average Resident Note Time by Note Type & PGY
-g4 <- ggplot(modified_df, aes(x = Label, y = Real_Mean2, group = pgy2_split, color = pgy2_split)) +
+g4 <- ggplot(modified_df, aes(x = Label, y = Real_Mean2, group = pgy2_split, color = pgy2_split, shape = pgy2_split)) +
   geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
                 position = position_dodge(width = 0.5), width = 0.1) +
@@ -1609,15 +1590,15 @@ g4 <- ggplot(modified_df, aes(x = Label, y = Real_Mean2, group = pgy2_split, col
   labs(title = "C: Note Type & Resident Class",
        x = "Note Type (Count)",
        y = "Average Time (min)",
-       color = "Resident Class") +
+       color = "Resident Class",
+       shape = "Resident Class") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
         axis.title.y = element_text(angle = 90, vjust = 0.5, margin = margin(r = 20, unit = "pt"))) +  # Rotate y-axis label to vertical and add space
   ylim(0, 62)  # Dynamically set y-axis limit to accommodate text
 
-
 print(g4)
-ggsave("figure4.png", plot = g4, width = 10, height = 6)
+ggsave("figure4.png", plot = g4, width = 10, height = 6, dpi = 600)
 
 ```
 
@@ -1632,7 +1613,8 @@ combined_plot <- g3 / g2 / g4 +
 # Print the combined plot
 print(combined_plot)
 
-ggsave("whiskers.png", plot = combined_plot, width = 10, height = 18)
+ggsave("whiskers.tiff", plot = combined_plot, width = 10, height = 18, dpi = 600, device = "tiff")
+
 
 ```
 
@@ -1736,6 +1718,9 @@ writeLines(low_total_rows, "other.rows.txt")
 
 resident_counts <- resident.names %>%
   summarise(across(everything(), ~ sum(!is.na(.))))
+
+cons.data <- readRDS("cons_data.rds")
+
 
 # Summary statement
 print(
