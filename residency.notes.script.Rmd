@@ -72,6 +72,7 @@ library(DescTools)
 library(multcomp)
 library(rstatix)
 library(broom)
+library(patchwork)
 conflict_prefer("select", "dplyr")
 conflicts_prefer(dplyr::filter)  # Set conflict resolution preferences
 
@@ -1059,24 +1060,6 @@ ggsave("plot_filetime.png", plot = plot_filetime, width = 10, height = 6, dpi = 
 ```
 
 
-```{r, studying variances}
-
-# If car package is not installed, install it first
-# install.packages("car")
-library(car)
-
-# Assuming `notestatus` is the grouping variable
-leveneTest(cons.data$total.time, cons.data$pgy, center = median)
-
-
-# Bartlett's test with `notestatus` as the grouping factor
-bartlett.test(cons.data$total.time, cons.data$pgy)
-
-
-
-```
-
-
 ```{r, per resident and figure 1, echo=false}
 
 per.resident <- readRDS("per.resident.rds")
@@ -1327,6 +1310,7 @@ result_df <- merge(result_df, typecounts, by.x="group2", by.y="NoteType")
 result_df$Label <- factor(result_df$Label, levels = typecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
+# # Whisker Plot of Average Note Time by Author's Type & Note Type
 g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
   geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
@@ -1334,13 +1318,13 @@ g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
   geom_text(aes(label = paste("N =", N2), y = 60),  # Adjust y position to minimize overlap
             position = position_dodge(width = 0.5), angle = 90, vjust = -0.5, hjust = 1, 
             size = 2.0) +  # Smaller text size
-  labs(title = "A",
+  labs(title = "A: Note Type & Author Type",
        x = "Note Type (Count)",
        y = "Average Time (min)",
-       color = "Author's Type") +
+       color = "Author Type") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
-        axis.title.y = element_text(angle = 0, vjust = 0.5)) +
+        axis.title.y = element_text(angle = 90, vjust = 0.5, margin = margin(r = 20, unit = "pt"))) +  # Rotate y-axis label to vertical and add space
   ylim(0, 62)  # Dynamically set y-axis limit to accommodate text
 
 print(g2)
@@ -1360,27 +1344,36 @@ cons.data <- readRDS("cons_data.rds")
 cons.data <- cons.data %>%
   mutate(other.time = total.time - staff.time - resident.time)
 
+# Recode specific labels in 'result_df$Label'
+cons.data$authorsservice <- dplyr::recode(cons.data$authorsservice,
+                          "Critical Care PICU" = "PICU",
+                          "Critical Care NICU" = "NICU",
+                          "Center for Disabilities and Development" = "CDD")
+
 # Create a table of note types
 note_type_table <- table(cons.data$notetype)
 
+# Create a table of note services
+service_table <- table(cons.data$authorsservice)
+
 # Convert the table to a dataframe
-typecounts <- data.frame(
-  NoteType = names(note_type_table),
-  Counts = as.integer(note_type_table)
+servicecounts <- data.frame(
+  NoteService = names(service_table),
+  Counts = as.integer(service_table)
 )
 
 # Sort the dataframe by counts in descending order and keep the top 10
-typecounts <- typecounts[order(-typecounts$Counts), ]
-typecounts <- head(typecounts, 10)
+servicecounts <- servicecounts[order(-servicecounts$Counts), ]
+servicecounts <- head(servicecounts, 14)
 
-# Extract the NoteType column to create a character vector of allowed note types (highest 10 in frequency, excluding flowsheet notes)
-allowed_notetypes <- c("Progress Notes", "Clinic Note", "Discharge Summary", "H&P", "Emergency Department", "Procedures", "Telephone Encounter", "Event", "Consults")
+# Extract the NoteType column to create a character vector of allowed note types
+allowed_noteservice <- as.character(servicecounts$NoteService)
 
 # Define the list of combinations to analyze
 combinations <- list(
-  list(cont_var = "resident.time", cat_var = "notetype"),
-  list(cont_var = "other.time", cat_var = "notetype"),
-  list(cont_var = "staff.time", cat_var = "notetype")
+  list(cont_var = "resident.time", cat_var = "authorsservice"),
+  list(cont_var = "other.time", cat_var = "authorsservice"),
+  list(cont_var = "staff.time", cat_var = "authorsservice")
 )
 
 # Apply the perform_analysis function to each combination
@@ -1406,17 +1399,13 @@ combined_df <- bind_rows(
   .id = "source_id"  # This optional line adds an ID for each source data frame
 )
 
-modified_df <- combined_df %>%
+
+# Select needed columns and Filter rows where 'group2' is in the allowed notetypes, then adjusting the time units from seconds to minutes for 'Real_Mean2' and CI bounds
+
+result_df <- combined_df %>%
   select(variable, group1, group2, N2, Real_Mean2, LCI2, UCI2, p.adj, p.adj.signif, estimate, conf.low, conf.high, Mean_Difference, CI_Real_Mean2_Lower, CI_Real_Mean2_Upper) %>%
-  distinct()
-
-# Filter rows where 'group2' is in the allowed notetypes
-filtered_df <- modified_df %>%
-  filter(group2 %in% allowed_notetypes) %>%
-  distinct()
-
-# Adjusting the time units from seconds to minutes for 'Real_Mean2' and CI bounds
-result_df <- filtered_df %>%
+  distinct() %>%
+  filter(group2 %in% allowed_noteservice) %>%
   group_by(group2, variable) %>%
   mutate(Real_Mean2 = Real_Mean2 / 60,
          LCI2 = LCI2 / 60,
@@ -1434,37 +1423,38 @@ result_df$variable <- dplyr::recode(result_df$variable,
                              "other.time" = "Other")
 
 # Create a new label that combines note type and count
-typecounts$Label <- paste(typecounts$NoteType, " (", typecounts$Counts, ")", sep="")
+servicecounts$Label <- paste(servicecounts$NoteService, " (", servicecounts$Counts, ")", sep="")
 
 # Sort 'typecounts' by 'Counts' in descending order
-typecounts <- typecounts[order(-typecounts$Counts), ]
+servicecounts <- servicecounts[order(-servicecounts$Counts), ]
 
 # Merge this label with the result_df dataframe based on NoteType
-result_df <- merge(result_df, typecounts, by.x="group2", by.y="NoteType")
+result_df <- merge(result_df, servicecounts, by.x="group2", by.y="NoteService")
 
 # Set the factor levels for 'Label' in 'result_df' based on the order in 'typecounts'
-result_df$Label <- factor(result_df$Label, levels = typecounts$Label)
+result_df$Label <- factor(result_df$Label, levels = servicecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
-g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
-  geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
+# # Whisker Plot of Average Note Time by Author's type & Author's Service
+g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
+  geom_point(position = position_dodge(width = 0.5)) +
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
                 position = position_dodge(width = 0.5), width = 0.1) +
-  geom_text(aes(label = paste("N =", N2), y = 60),  # Adjust y position to minimize overlap
+  geom_text(aes(label = paste("N =", N2), y = 70),  # Adjust y position to minimize overlap
             position = position_dodge(width = 0.5), angle = 90, vjust = -0.5, hjust = 1, 
-            size = 2.0) +  # Smaller text size
-  labs(title = "A",
-       x = "Note Type (Count)",
+            size = 2.0) +
+  labs(title = "B: Author Type & Service",
+       x = "Author Service (Count)",
        y = "Average Time (min)",
-       color = "Author's Type") +
+       color = "Author Type") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
-        axis.title.y = element_text(angle = 0, vjust = 0.5)) +
-  ylim(0, 62)  # Dynamically set y-axis limit to accommodate text
+        axis.title.y = element_text(angle = 90, vjust = 0.5, margin = margin(r = 20, unit = "pt"))) +  # Rotate y-axis label to vertical and add space
+  ylim(0, 72)  # Dynamically set y-axis limit to accommodate text
 
-print(g2)
+print(g3)
 
-ggsave("figure2.png", plot = g2, width = 10, height = 5)
+ggsave("figure3.png", plot = g3, width = 10, height = 5)
 
 ### NOW MAKE GRAPHS (WHISKER PLOTS) FOR EACH GROUP OF DATA: note type, authors service, PGY, CCAs, collapsible
 
@@ -1528,20 +1518,42 @@ if (nrow(per.resident) > 1) {
 post_hoc_results <- per.resident %>%
   games_howell_test(log_transformed ~ notetype_pgy)
 
-post_hoc_results <- post_hoc_results %>%
+  # Reversing groups and adjusting corresponding values
+  reversed_post_hoc_results <- post_hoc_results %>%
+  mutate(
+    # Swap groups
+    old_group1 = group1,
+    group1 = group2,
+    group2 = old_group1,
+    
+    # Reverse the signs of estimates and confidence intervals
+    estimate = -estimate,
+    old_conf_low = conf.low,
+    conf.low = -conf.high,
+    conf.high = -old_conf_low
+  ) %>%
+  select(-old_group1, -old_conf_low)  # Removing temporary columns
+
+  # Combine the original and reversed data frames
+  combined_results <- bind_rows(post_hoc_results, reversed_post_hoc_results) %>%
+  distinct
+
+# Assuming allowed_notetypes is already defined as you mentioned
+allowed_notetypes <- c("Progress Notes", "Clinic Note", "Discharge Summary", "H&P", "Emergency Department", "Procedures", "Telephone Encounter", "Event", "Consults")
+  
+post_hoc_results <- combined_results %>%
   separate(group2, into = c("notetype2_split", "pgy2_split"), sep = "\\.", extra = "merge") %>%
   separate(group1, into = c("notetype1_split", "pgy1_split"), sep = "\\.", extra = "merge")
-
 
 # Merge to add Real Means
 post_hoc_results <- post_hoc_results %>%
   left_join(descriptive_stats %>%
-              rename(group1_notetype = notetype, group1_pgy = pgy) %>%
-              select(group1_notetype, group1_pgy, N, Real_Mean1 = Real_Mean), 
+              rename(group1_notetype = notetype, group1_pgy = pgy, N1 = N, LCI1 = ci_lower, UCI1 = ci_upper, sd1 = sd, se1 = SE, Real_Mean1 = Real_Mean) %>%
+              select(group1_notetype, group1_pgy, N1, LCI1, UCI1, sd1, se1, Real_Mean1), 
             by = c("notetype1_split" = "group1_notetype", "pgy1_split" = "group1_pgy")) %>%
   left_join(descriptive_stats %>%
-              rename(group2_notetype = notetype, group2_pgy = pgy) %>%
-              select(group2_notetype, group2_pgy, Real_Mean2 = Real_Mean), 
+              rename(group2_notetype = notetype, group2_pgy = pgy, N2 = N, LCI2 = ci_lower, UCI2 = ci_upper, sd2 = sd, se2 = SE, Real_Mean2 = Real_Mean) %>%
+              select(group2_notetype, group2_pgy, N2, LCI2, UCI2, sd2, se2, Real_Mean2), 
             by = c("notetype2_split" = "group2_notetype", "pgy2_split" = "group2_pgy")) %>%
   mutate(
     Mean_Difference = Real_Mean2 - Real_Mean1,
@@ -1551,45 +1563,76 @@ post_hoc_results <- post_hoc_results %>%
   )
 
 modified_df <- post_hoc_results %>%
-  select(notetype2_split, pgy2_split, N, Real_Mean2, CI_Real_Mean2_Lower, CI_Real_Mean2_Upper, p.adj, p.adj.signif) %>%
-  distinct()
-
-# Adjusting the time units from seconds to minutes for 'Real_Mean2' and CI bounds
-result_df <- modified_df %>%
+  select(notetype1_split, pgy1_split, notetype2_split, pgy2_split, N2, Real_Mean2, LCI2, UCI2, p.adj, p.adj.signif, estimate, conf.low, conf.high, Mean_Difference, CI_Real_Mean2_Lower, CI_Real_Mean2_Upper) %>%
+  distinct() %>%
+  filter(notetype2_split %in% allowed_notetypes) %>%
   group_by(notetype2_split, pgy2_split) %>%
   mutate(Real_Mean2 = Real_Mean2 / 60,
+         LCI2 = LCI2 / 60,
+         UCI2 = UCI2 / 60,
+         Mean_Difference = Mean_Difference / 60,
          CI_Real_Mean2_Lower = CI_Real_Mean2_Lower / 60,
          CI_Real_Mean2_Upper = CI_Real_Mean2_Upper / 60) %>%
   slice_min(order_by = CI_Real_Mean2_Upper - CI_Real_Mean2_Lower) %>%
   ungroup()
 
+# Create a table of note types
+note_type_table <- table(cons.data$notetype)
+
+# Convert the table to a dataframe
+typecounts <- data.frame(
+  NoteType = names(note_type_table),
+  Counts = as.integer(note_type_table)
+)
+
 # Create a new label that combines note type and count
-pgycounts$Label <- paste(pgycounts$pgy, " (", pgycounts$Counts, ")", sep="")
+typecounts$Label <- paste(typecounts$NoteType, " (", typecounts$Counts, ")", sep="")
 
 # Sort 'typecounts' by 'Counts' in descending order
-pgycounts <- pgycounts[order(-pgycounts$Counts), ]
+typecounts <- typecounts[order(-typecounts$Counts), ]
 
-# Assuming allowed_notetypes is already defined as you mentioned
-allowed_notetypes <- c("Progress Notes", "Clinic Note", "Discharge Summary", "H&P", "Flowsheet Note", 
-                       "Emergency Department", "Procedures", "Telephone Encounter", "Event", "Consults")
+# Merge this label with the result_df dataframe based on NoteType
+modified_df <- merge(modified_df, typecounts, by.x="notetype2_split", by.y="NoteType")
 
-# Filter the dataframe
-result_df <- result_df[result_df$notetype2_split %in% allowed_notetypes, ]
+# Set the factor levels for 'Label' in 'result_df' based on the order in 'typecounts'
+modified_df$Label <- factor(modified_df$Label, levels = typecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
-g4 <- ggplot(result_df, aes(x = notetype2_split, y = Real_Mean2, group = pgy2_split, color = pgy2_split)) +
+# # Whisker Plot of Average Resident Note Time by Note Type & PGY
+g4 <- ggplot(modified_df, aes(x = Label, y = Real_Mean2, group = pgy2_split, color = pgy2_split)) +
   geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
                 position = position_dodge(width = 0.5), width = 0.1) +
-  labs(title = "Whisker Plot of Average Resident Note Time by Note Type & PGY",
-       x = "Note Type",
+  geom_text(aes(label = paste("N =", N2), y = 60),  # Adjust y position to minimize overlap
+                position = position_dodge(width = 0.5), angle = 90, vjust = -0.5, hjust = 1, 
+                size = 2.0) +
+  labs(title = "C: Note Type & Resident Class",
+       x = "Note Type (Count)",
        y = "Average Time (min)",
-       color = NULL) +
+       color = "Resident Class") +
   theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
+        axis.title.y = element_text(angle = 90, vjust = 0.5, margin = margin(r = 20, unit = "pt"))) +  # Rotate y-axis label to vertical and add space
+  ylim(0, 62)  # Dynamically set y-axis limit to accommodate text
+
 
 print(g4)
 ggsave("figure4.png", plot = g4, width = 10, height = 6)
+
+```
+
+
+```{r, mergeing the 3 whiskers}
+
+# Assuming g2, g3, and g4 are your ggplot objects
+combined_plot <- g3 / g2 / g4 + 
+  plot_annotation(title = "Whisker Plots of Average Note Time, 95% CI and Count",
+                  theme = theme(plot.title = element_text(hjust = 0.5))) # Center the title
+
+# Print the combined plot
+print(combined_plot)
+
+ggsave("whiskers.png", plot = combined_plot, width = 10, height = 18)
 
 ```
 
