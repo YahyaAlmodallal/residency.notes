@@ -509,7 +509,7 @@ all_data_1 <- all_data_1 %>%
     notetype %in% c("Clinic Note", "Clinical Letter") ~ "Ambulatory",
     notetype %in% c("Discharge Summary", "H&P", "Interim Progress Note", "Progress Notes") ~ "Inpatient",
     notetype %in% c("ED Provider Notes", "ED Notes") ~ "Emergency Department",
-    notetype %in% c("Telephone Encounter", "ED Notes") ~ "Telephone Encounter",
+    notetype %in% c("Telephone Encounter") ~ "Telephone Encounter",
     TRUE ~ encountercontext
   )) %>%
   mutate(authorsservice = case_when(
