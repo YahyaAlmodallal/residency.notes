@@ -500,8 +500,8 @@ all_data_1 <- all_data_1 %>%
     noteid = as.character(noteid),
     # Recategorize 'authortype'
     authortype = case_when(
-      authortype %in% c("(Other)", "Clerk", "Dietitian", "Medical Student", "Non-Privileged Provider", "Nurse-ARNP", "Nursing Assistant", "Pharmacist", "Physician-Fellow", "Dentist-Resident", "Medical Assistant", "Occupational Therapist", "PA Student", "Physical Therapist", "Speech Pathologist", "Student Nurse") ~ "other",
-      authortype %in% c("Anesthesiologist", "Physician-Associate", "Physician-Fellow Associate", "Physician-Staff", "Physician-Visit Assistant Prof", "Physician-Visit Associate", "Physician Assistant", "Registered Nurse", "Social Worker") ~ "attending",
+      authortype %in% c("(Other)", "Clerk", "Dietitian", "Medical Student", "Non-Privileged Provider", "Nurse-ARNP", "Nursing Assistant", "Pharmacist", "Physician-Fellow", "Dentist-Resident", "Medical Assistant", "Occupational Therapist", "PA Student", "Physical Therapist", "Speech Pathologist", "Student Nurse", "Physician Assistant", "Registered Nurse", "Social Worker") ~ "other",
+      authortype %in% c("Anesthesiologist", "Physician-Associate", "Physician-Fellow Associate", "Physician-Staff", "Physician-Visit Assistant Prof", "Physician-Visit Associate") ~ "attending",
       authortype == "Physician-Resident" ~ "resident",
       TRUE ~ authortype # Preserve original for undefined categories
     )
@@ -511,7 +511,7 @@ all_data_1 <- all_data_1 %>%
     notetype %in% c("Clinic Note", "Clinical Letter") ~ "Ambulatory",
     notetype %in% c("Discharge Summary", "H&P", "Interim Progress Note", "Progress Notes") ~ "Inpatient",
     notetype %in% c("ED Provider Notes", "ED Notes") ~ "Emergency Department",
-    notetype %in% c("Telephone Encounter", "ED Notes") ~ "Telephone Encounter",
+    notetype %in% c("Telephone Encounter") ~ "Telephone Encounter",
     TRUE ~ encountercontext
   )) %>%
   mutate(authorsservice = case_when(
@@ -548,8 +548,7 @@ summary.1 <- sum_df(all_data_1)
     ) %>%
     filter(authorcount == timecount) %>%
     select(-authorcount, -timecount)
-  summary.2 <- sum_df(all_data_2)
-  
+
   # not equal number (too many edit instances)
   not_equal <- all_data_1 %>%
     mutate(
@@ -558,12 +557,21 @@ summary.1 <- sum_df(all_data_1)
     ) %>%
     filter(authorcount != timecount) %>%
     select(-authorcount, -timecount)
-  summary.3 <- sum_df(not_equal)
-  
+
   # not available edit time information
   combined <- bind_rows(not_equal, all_data_2)
     no_times <- anti_join(all_data_1, combined, by = "noteid")
-  summary.4 <- sum_df(no_times)
+
+  all_exported_count = nrow(all_data_1)
+  after_deleteing_incomplete_data_count = nrow(all_data_2)
+  inequal_number_count = nrow(not_equal)
+  no_time_data_count = nrow(no_times)
+  
+  print(nrow(all_data_1))
+  print(nrow(all_data_2))
+  print(nrow(not_equal))
+  print(nrow(no_times))
+  
   
 # The edit start and edit stop dates are not uniform, there were about 3000 values where the dates are shown as serial numbers, luckily these are easy to extract since each has a single editing instance
   # Extract serial number dates and convert them back to actual dates, then calculate the time between the start and end of each note
@@ -875,6 +883,10 @@ summary.6 = sum_df(all_data_8)
   # join the 3 dataframes, leaving out those outside the date range
   all_data_8 <- bind_rows(data_21, data_22, data_23)
 
+  
+  outside_time_range_count = nrow(all_data_7) - nrow(data_21) - nrow(data_22) - nrow(data_23)
+  print(outside_time_range_count)
+  
   # Remove these rows from the original data frame
   all_data_9 <- all_data_8 %>%
     filter(
