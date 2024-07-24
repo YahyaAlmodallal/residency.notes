@@ -275,10 +275,10 @@ calculate_statistics <- function(df) {
   quantile_75th_time_mins <- quantile(df$resident.time / 60, probs = 0.75)
   weekend_time_days <- sum(df$weekend) / (60 * 60 * 24)
   percentage_weekend <- sum(df$weekend) / sum(df$resident.time) * 100
-  pm_time_days <- sum(df$pm) / (60 * 60 * 24)
-  percentage_pm <- sum(df$pm) / sum(df$resident.time) * 100
-  after_hours_time_days <- sum(df$after.hours) / (60 * 60 * 24)
-  percentage_after_hours <- sum(df$after.hours) / sum(df$resident.time) * 100
+  pm_time_days <- sum(df$pm, na.rm = TRUE) / (60 * 60 * 24)
+  percentage_pm <- sum(df$pm, na.rm = TRUE) / sum(df$resident.time) * 100
+  after_hours_time_days <- sum(df$after.hours, na.rm = TRUE) / (60 * 60 * 24)
+  percentage_after_hours <- sum(df$after.hours, na.rm = TRUE) / sum(df$resident.time) * 100
   mean_note_size <- exp(mean(log(df$notesize), na.rm = TRUE))
   sd_note_size <- exp(sd(log(df$notesize), na.rm = TRUE))
   count_dictated <- sum(df$`%voice` > 0, na.rm = TRUE)
@@ -890,15 +890,19 @@ summary.6 = sum_df(all_data_8)
   # Remove these rows from the original data frame
   all_data_9 <- all_data_8 %>%
     filter(
-      (`edittime(seconds)` > 5 & !author %in% staffs) |  # Handle edittime and author conditions
+      (`edittime(seconds)` > 3 & !author %in% staffs) |  # Handle edittime and author conditions
       (`edittime(seconds)` > 0 & author %in% staffs)   # Handle edittime and author conditions
     )
+  
+  editing_time_insufficient_count = nrow(all_data_8) - nrow(all_data_9)
+  print(editing_time_insufficient_count)
   
   all_data_9 <- all_data_9 %>%
     filter((is.na(notesize) | notesize != 0))    # Keep notesize that are NA or not zero
 
-    nrow(all_data_8)
-    nrow(all_data_9)
+  empty_note_count = nrow(all_data_8) - editing_time_insufficient_count - nrow(all_data_9)
+  print(empty_note_count)
+
     # These are unaccounted for since they are overlapped between the criteria above (e.g. <5 seconds and before 6/30/21)
       removed = - nrow(all_data_9) + nrow(all_data_8)
       print(removed)
