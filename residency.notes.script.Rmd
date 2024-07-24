@@ -485,6 +485,8 @@ staffs <- true.service %>%
 # Convert all column names to lowercase and remove spaces
 names(all_data_1) <- tolower(gsub("[ '?]", "", names(all_data_1)))
 
+u = sum_df(all_data_1)
+
 # Refining: rename columns, column class, nnsy service, delete columns
 all_data_1 <- all_data_1 %>%
   rename(
