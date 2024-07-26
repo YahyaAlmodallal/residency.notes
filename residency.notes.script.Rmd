@@ -112,10 +112,13 @@ sum_df <- function(df) {
   if (!is.null(num_vars)) {
     summary_list$Numerical_Variables <- lapply(num_vars, function(x) {
       list(
-        Median = median(x, na.rm = TRUE),
-        IQR = IQR(x, na.rm = TRUE),
-        Min = min(x, na.rm = TRUE),
-        Max = max(x, na.rm = TRUE)
+        Median = median(x, na.rm = TRUE) / 60,
+        IQR_min = IQR(x, na.rm = TRUE) / 60,
+        Min_min = min(x, na.rm = TRUE) / 60,
+        Max_min = max(x, na.rm = TRUE) / 60,
+        log_avg_min = exp(mean(log(x / 60), na.rm = TRUE)),
+        log_sd_min = exp(sd(log(x / 60), na.rm = TRUE)),
+        total_day = sum(x, na.rm = TRUE) / (60 * 60 * 24)
       )
     })
   }
@@ -485,8 +488,6 @@ staffs <- true.service %>%
 # Convert all column names to lowercase and remove spaces
 names(all_data_1) <- tolower(gsub("[ '?]", "", names(all_data_1)))
 
-u = sum_df(all_data_1)
-
 # Refining: rename columns, column class, nnsy service, delete columns
 all_data_1 <- all_data_1 %>%
   rename(
@@ -515,10 +516,11 @@ all_data_1 <- all_data_1 %>%
     TRUE ~ encountercontext
   )) %>%
   mutate(authorsservice = case_when(
-    authorsservice %in% c("Pediatrics", "QuickCare") ~ "PED General",
-    authorsservice == "Psychiatry" ~ "PSY Child Psychiatry",
-    authorsservice == "MED Allergy/Immunology" ~ "PED Allergy/Immunology",
-    TRUE ~ authorsservice
+      is.na(authorsservice) | authorsservice == "" ~ "unknown",  # Checks for NA or empty strings and replaces with "unknown"
+      authorsservice %in% c("Pediatrics", "QuickCare") ~ "PED General",
+      authorsservice == "Psychiatry" ~ "PSY Child Psychiatry",
+      authorsservice == "MED Allergy/Immunology" ~ "PED Allergy/Immunology",
+      TRUE ~ authorsservice
   )) %>%
   mutate(notetype = case_when(
     notetype %in% c("ED Provider Notes", "ED Notes") ~ "Emergency Department",
@@ -528,6 +530,9 @@ all_data_1 <- all_data_1 %>%
   mutate(encountercontext = if_else(encountercontext == "HOV", "Ambulatory", encountercontext)) %>%
   # Set authorsservice for Emergency Department
   mutate(authorsservice = if_else(encountercontext == "Emergency Department", "Emergency Department", authorsservice)) %>%
+  mutate(encountercontext = if_else(authorsservice == "Emergency Department", "Emergency Department", encountercontext)) %>%
+  mutate(notetype = if_else(encountercontext == "Emergency Department", "Emergency Department", notetype)) %>%
+  mutate(notetype = if_else(encountercontext == "Telephone Encounter", "Telephone Encounter", notetype)) %>%
   # Update encountercontext for specific services
   mutate(encountercontext = case_when(
     (encountercontext %in% c("Ambulatory", "Inpatient") & authorsservice == "Emergency Department") ~ "Emergency Department",
@@ -890,7 +895,7 @@ summary.6 = sum_df(all_data_8)
   # Remove these rows from the original data frame
   all_data_9 <- all_data_8 %>%
     filter(
-      (`edittime(seconds)` > 3 & !author %in% staffs) |  # Handle edittime and author conditions
+      (`edittime(seconds)` > 2 & !author %in% staffs) |  # Handle edittime and author conditions
       (`edittime(seconds)` > 0 & author %in% staffs)   # Handle edittime and author conditions
     )
   
@@ -1738,6 +1743,7 @@ resident_counts <- resident.names %>%
   summarise(across(everything(), ~ sum(!is.na(.))))
 
 cons.data <- readRDS("cons_data.rds")
+z = sum_df(cons.data)
 
 
 # Summary statement
