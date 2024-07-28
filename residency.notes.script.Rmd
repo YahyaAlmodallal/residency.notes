@@ -1152,6 +1152,24 @@ all.data <- readRDS("all_data.rds")
 
 ```
 
+```{r, per block, echo=FALSE}
+block_start_dates <- c(as.Date("2021-07-01"), seq(as.Date("2021-08-02"), as.Date("2024-06-30"), by = 28))
+split_data_list <- list()
+
+for (i in seq_along(block_start_dates)){
+  if (i < length(block_start_dates)) {
+    split_data_list[[i]] <- cons.data %>%
+      filter(dtofsvc >= block_start_dates[i] & dtofsvc < block_start_dates[i + 1])
+    print(split_data_list[[i]])
+  } else {
+    # For the last block, take all dates from the last date to the end of the range
+    split_data_list[[i]] <- cons.data %>%
+      filter(dtofsvc >= block_start_dates[i])
+  }
+}
+
+block_data <- do.call(rbind, lapply(split_data_list, calculate_statistics))
+```
 
 ```{r, correlations}
 
