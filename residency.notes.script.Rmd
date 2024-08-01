@@ -1774,15 +1774,48 @@ print(
 
 
 
-```{r}
+```{r, counting resident note days}
 
+all.data <- readRDS("all_data.rds")
 
+pgy1 <- all.data %>%
+  filter(pgy %in% c("pgy1.21.22", "pgy1.22.23", "pgy1.23.24"))
 
+pgy2 <- all.data %>%
+  filter(pgy %in% c("pgy2.21.22", "pgy2.22.23", "pgy2.23.24"))
 
-
-
-
+pgy3 <- all.data %>%
+  filter(pgy %in% c("pgy3.21.22", "pgy3.22.23", "pgy3.23.24"))
   
+list.residents.1 <- split(pgy1, pgy1$author)
+list.residents.2 <- split(pgy2, pgy2$author)
+list.residents.3 <- split(pgy3, pgy3$author)
+
+# Function to count unique days, considering day and night shifts (a day is between 0700 of a given day and 0700 the next day)
+note_days <- function(df) {
+  # Create a shift indicator based on the time
+  df <- df %>%
+    mutate(
+      dtofsvc_date = as.Date(dtofsvc),
+      shift = if_else(hour(dtofsvc) >= 7 & hour(dtofsvc) < 18, "Day", "Night"),
+      # Adjust date for night shift; if it starts before midnight, it's part of the next day
+      dtofsvc_date_adjusted = if_else(shift == "Night" & hour(dtofsvc) < 6, dtofsvc_date - days(1), dtofsvc_date)
+    ) %>%
+    summarize(count = n_distinct(dtofsvc_date_adjusted),
+              time.in.days = sum(`edittime(seconds)`/60/60/24))
+  
+  # Return a tibble with the counts
+  tibble(df)
+}
+
+# Apply this function to each dataframe in a list
+list_shift_counts.1 <- lapply(list.residents.1, note_days)
+list_shift_counts.2 <- lapply(list.residents.2, note_days)
+list_shift_counts.3 <- lapply(list.residents.3, note_days)
+
+# Optionally, combine all results into one dataframe with names if the list has names
+combined_results <- bind_rows(list_shift_counts.1, list_shift_counts.2, list_shift_counts.3, .id = "ResidentID")
+
 
 ````
 
