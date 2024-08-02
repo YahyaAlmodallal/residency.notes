@@ -1170,7 +1170,7 @@ for (i in seq_along(block_start_dates)){
       filter(dtofsvc >= block_start_dates[i])
   }
 }
-
+#change
 block_data <- do.call(rbind, lapply(split_data_list, calculate_statistics))
 
 # 1. total time vs resident time vs attending time (changes in sum in days over blocks)
