@@ -112,10 +112,13 @@ sum_df <- function(df) {
   if (!is.null(num_vars)) {
     summary_list$Numerical_Variables <- lapply(num_vars, function(x) {
       list(
-        Median = median(x, na.rm = TRUE),
-        IQR = IQR(x, na.rm = TRUE),
-        Min = min(x, na.rm = TRUE),
-        Max = max(x, na.rm = TRUE)
+        Median = median(x, na.rm = TRUE) / 60,
+        IQR_min = IQR(x, na.rm = TRUE) / 60,
+        Min_min = min(x, na.rm = TRUE) / 60,
+        Max_min = max(x, na.rm = TRUE) / 60,
+        log_avg_min = exp(mean(log(x / 60), na.rm = TRUE)),
+        log_sd_min = exp(sd(log(x / 60), na.rm = TRUE)),
+        total_day = sum(x, na.rm = TRUE) / (60 * 60 * 24)
       )
     })
   }
@@ -275,10 +278,10 @@ calculate_statistics <- function(df) {
   quantile_75th_time_mins <- quantile(df$resident.time / 60, probs = 0.75)
   weekend_time_days <- sum(df$weekend) / (60 * 60 * 24)
   percentage_weekend <- sum(df$weekend) / sum(df$resident.time) * 100
-  pm_time_days <- sum(df$pm) / (60 * 60 * 24)
-  percentage_pm <- sum(df$pm) / sum(df$resident.time) * 100
-  after_hours_time_days <- sum(df$after.hours) / (60 * 60 * 24)
-  percentage_after_hours <- sum(df$after.hours) / sum(df$resident.time) * 100
+  pm_time_days <- sum(df$pm, na.rm = TRUE) / (60 * 60 * 24)
+  percentage_pm <- sum(df$pm, na.rm = TRUE) / sum(df$resident.time) * 100
+  after_hours_time_days <- sum(df$after.hours, na.rm = TRUE) / (60 * 60 * 24)
+  percentage_after_hours <- sum(df$after.hours, na.rm = TRUE) / sum(df$resident.time) * 100
   mean_note_size <- exp(mean(log(df$notesize), na.rm = TRUE))
   sd_note_size <- exp(sd(log(df$notesize), na.rm = TRUE))
   count_dictated <- sum(df$`%voice` > 0, na.rm = TRUE)
@@ -498,8 +501,8 @@ all_data_1 <- all_data_1 %>%
     noteid = as.character(noteid),
     # Recategorize 'authortype'
     authortype = case_when(
-      authortype %in% c("(Other)", "Clerk", "Dietitian", "Medical Student", "Non-Privileged Provider", "Nurse-ARNP", "Nursing Assistant", "Pharmacist", "Physician-Fellow", "Dentist-Resident", "Medical Assistant", "Occupational Therapist", "PA Student", "Physical Therapist", "Speech Pathologist", "Student Nurse") ~ "other",
-      authortype %in% c("Anesthesiologist", "Physician-Associate", "Physician-Fellow Associate", "Physician-Staff", "Physician-Visit Assistant Prof", "Physician-Visit Associate", "Physician Assistant", "Registered Nurse", "Social Worker") ~ "attending",
+      authortype %in% c("(Other)", "Clerk", "Dietitian", "Medical Student", "Non-Privileged Provider", "Nurse-ARNP", "Nursing Assistant", "Pharmacist", "Physician-Fellow", "Dentist-Resident", "Medical Assistant", "Occupational Therapist", "PA Student", "Physical Therapist", "Speech Pathologist", "Student Nurse", "Physician Assistant", "Registered Nurse", "Social Worker") ~ "other",
+      authortype %in% c("Anesthesiologist", "Physician-Associate", "Physician-Fellow Associate", "Physician-Staff", "Physician-Visit Assistant Prof", "Physician-Visit Associate") ~ "attending",
       authortype == "Physician-Resident" ~ "resident",
       TRUE ~ authortype # Preserve original for undefined categories
     )
@@ -513,10 +516,11 @@ all_data_1 <- all_data_1 %>%
     TRUE ~ encountercontext
   )) %>%
   mutate(authorsservice = case_when(
-    authorsservice %in% c("Pediatrics", "QuickCare") ~ "PED General",
-    authorsservice == "Psychiatry" ~ "PSY Child Psychiatry",
-    authorsservice == "MED Allergy/Immunology" ~ "PED Allergy/Immunology",
-    TRUE ~ authorsservice
+      is.na(authorsservice) | authorsservice == "" ~ "unknown",  # Checks for NA or empty strings and replaces with "unknown"
+      authorsservice %in% c("Pediatrics", "QuickCare") ~ "PED General",
+      authorsservice == "Psychiatry" ~ "PSY Child Psychiatry",
+      authorsservice == "MED Allergy/Immunology" ~ "PED Allergy/Immunology",
+      TRUE ~ authorsservice
   )) %>%
   mutate(notetype = case_when(
     notetype %in% c("ED Provider Notes", "ED Notes") ~ "Emergency Department",
@@ -526,6 +530,9 @@ all_data_1 <- all_data_1 %>%
   mutate(encountercontext = if_else(encountercontext == "HOV", "Ambulatory", encountercontext)) %>%
   # Set authorsservice for Emergency Department
   mutate(authorsservice = if_else(encountercontext == "Emergency Department", "Emergency Department", authorsservice)) %>%
+  mutate(encountercontext = if_else(authorsservice == "Emergency Department", "Emergency Department", encountercontext)) %>%
+  mutate(notetype = if_else(encountercontext == "Emergency Department", "Emergency Department", notetype)) %>%
+  mutate(notetype = if_else(encountercontext == "Telephone Encounter", "Telephone Encounter", notetype)) %>%
   # Update encountercontext for specific services
   mutate(encountercontext = case_when(
     (encountercontext %in% c("Ambulatory", "Inpatient") & authorsservice == "Emergency Department") ~ "Emergency Department",
@@ -546,8 +553,7 @@ summary.1 <- sum_df(all_data_1)
     ) %>%
     filter(authorcount == timecount) %>%
     select(-authorcount, -timecount)
-  summary.2 <- sum_df(all_data_2)
-  
+
   # not equal number (too many edit instances)
   not_equal <- all_data_1 %>%
     mutate(
@@ -556,12 +562,21 @@ summary.1 <- sum_df(all_data_1)
     ) %>%
     filter(authorcount != timecount) %>%
     select(-authorcount, -timecount)
-  summary.3 <- sum_df(not_equal)
-  
+
   # not available edit time information
   combined <- bind_rows(not_equal, all_data_2)
     no_times <- anti_join(all_data_1, combined, by = "noteid")
-  summary.4 <- sum_df(no_times)
+
+  all_exported_count = nrow(all_data_1)
+  after_deleteing_incomplete_data_count = nrow(all_data_2)
+  inequal_number_count = nrow(not_equal)
+  no_time_data_count = nrow(no_times)
+  
+  print(nrow(all_data_1))
+  print(nrow(all_data_2))
+  print(nrow(not_equal))
+  print(nrow(no_times))
+  
   
 # The edit start and edit stop dates are not uniform, there were about 3000 values where the dates are shown as serial numbers, luckily these are easy to extract since each has a single editing instance
   # Extract serial number dates and convert them back to actual dates, then calculate the time between the start and end of each note
@@ -873,18 +888,26 @@ summary.6 = sum_df(all_data_8)
   # join the 3 dataframes, leaving out those outside the date range
   all_data_8 <- bind_rows(data_21, data_22, data_23)
 
+  
+  outside_time_range_count = nrow(all_data_7) - nrow(data_21) - nrow(data_22) - nrow(data_23)
+  print(outside_time_range_count)
+  
   # Remove these rows from the original data frame
   all_data_9 <- all_data_8 %>%
     filter(
-      (`edittime(seconds)` > 5 & !author %in% staffs) |  # Handle edittime and author conditions
+      (`edittime(seconds)` > 2 & !author %in% staffs) |  # Handle edittime and author conditions
       (`edittime(seconds)` > 0 & author %in% staffs)   # Handle edittime and author conditions
     )
+  
+  editing_time_insufficient_count = nrow(all_data_8) - nrow(all_data_9)
+  print(editing_time_insufficient_count)
   
   all_data_9 <- all_data_9 %>%
     filter((is.na(notesize) | notesize != 0))    # Keep notesize that are NA or not zero
 
-    nrow(all_data_8)
-    nrow(all_data_9)
+  empty_note_count = nrow(all_data_8) - editing_time_insufficient_count - nrow(all_data_9)
+  print(empty_note_count)
+
     # These are unaccounted for since they are overlapped between the criteria above (e.g. <5 seconds and before 6/30/21)
       removed = - nrow(all_data_9) + nrow(all_data_8)
       print(removed)
@@ -1064,12 +1087,6 @@ ggsave("plot_filetime.png", plot = plot_filetime, width = 10, height = 6, dpi = 
 
 per.resident <- readRDS("per.resident.rds")
 
-# Step 1: Delete the specified columns
-per.resident <- per.resident %>%
-  select(-"birthdate", -"editstart", -"noteduration(physician)", -"noteauthorlogindept", -"noteauthornpi", 
-         -"shift", -"day", -"editstop", -"noteduration(resident)", -"specialtyatnote", -"timediff(hr)", 
-         -"noteauthor", -"edittime(seconds)", -"specialtycurrent")
-
 pgy1 <- per.resident %>%
   filter(pgy %in% c("pgy1.21.22", "pgy1.22.23", "pgy1.23.24"))
 
@@ -1138,39 +1155,6 @@ ggsave("figure.1.individual.variability.png", plot = combined_plot, width = 14, 
 ```
 
 
-```{r, per class and figure 2, echo=FALSE}
-
-all.data <- readRDS("all_data.rds")
-  class <- all.data %>%
-    filter(pgy != "NA")
-
-
-
-
-
-
-
-```
-
-```{r, per block, echo=FALSE}
-block_start_dates <- c(as.Date("2021-07-01"), seq(as.Date("2021-08-02"), as.Date("2024-06-30"), by = 28))
-split_data_list <- list()
-
-for (i in seq_along(block_start_dates)){
-  if (i < length(block_start_dates)) {
-    split_data_list[[i]] <- cons.data %>%
-      filter(dtofsvc >= block_start_dates[i] & dtofsvc < block_start_dates[i + 1])
-    print(split_data_list[[i]])
-  } else {
-    # For the last block, take all dates from the last date to the end of the range
-    split_data_list[[i]] <- cons.data %>%
-      filter(dtofsvc >= block_start_dates[i])
-  }
-}
-
-block_data <- do.call(rbind, lapply(split_data_list, calculate_statistics))
-```
-
 ```{r, correlations}
 
 cons.data <- readRDS("cons_data.rds")
@@ -1228,7 +1212,7 @@ c <- ggpairs(selected_data,
              diag = list(continuous = "barDiag"))
 
 # Saving the plot
-ggsave("cc.png", plot = c, width = 14, height = 12)
+ggsave("correlation.matrix.png", plot = c, width = 14, height = 14, dpi = 600, device = "png")
 
 
 ```
@@ -1329,7 +1313,7 @@ result_df$Label <- factor(result_df$Label, levels = typecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
 # # Whisker Plot of Average Note Time by Author's Type & Note Type
-g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
+g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable, shape = variable)) +
   geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
                 position = position_dodge(width = 0.5), width = 0.1) +
@@ -1339,7 +1323,8 @@ g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
   labs(title = "A: Note Type & Author Type",
        x = "Note Type (Count)",
        y = "Average Time (min)",
-       color = "Author Type") +
+       color = "Author Type",
+       shape = "Author Type") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
         axis.title.y = element_text(angle = 90, vjust = 0.5, margin = margin(r = 20, unit = "pt"))) +  # Rotate y-axis label to vertical and add space
@@ -1347,7 +1332,7 @@ g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
 
 print(g2)
 
-ggsave("figure2.png", plot = g2, width = 10, height = 5)
+ggsave("figure2.tiff", plot = g2, width = 10, height = 6, dpi = 600, device = "tiff")
 
 ### NOW MAKE GRAPHS (WHISKER PLOTS) FOR EACH GROUP OF DATA: note type, authors service, PGY, CCAs, collapsible
 
@@ -1454,7 +1439,7 @@ result_df$Label <- factor(result_df$Label, levels = servicecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
 # # Whisker Plot of Average Note Time by Author's type & Author's Service
-g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable)) +
+g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable, shape = variable)) +
   geom_point(position = position_dodge(width = 0.5)) +
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
                 position = position_dodge(width = 0.5), width = 0.1) +
@@ -1464,7 +1449,8 @@ g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
   labs(title = "B: Author Type & Service",
        x = "Author Service (Count)",
        y = "Average Time (min)",
-       color = "Author Type") +
+       color = "Author Type",
+       shape = "Author Type") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
         axis.title.y = element_text(angle = 90, vjust = 0.5, margin = margin(r = 20, unit = "pt"))) +  # Rotate y-axis label to vertical and add space
@@ -1472,7 +1458,7 @@ g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
 
 print(g3)
 
-ggsave("figure3.png", plot = g3, width = 10, height = 5)
+ggsave("figure3.tiff", plot = g3, width = 10, height = 5, dpi = 600, device = "tiff")
 
 ### NOW MAKE GRAPHS (WHISKER PLOTS) FOR EACH GROUP OF DATA: note type, authors service, PGY, CCAs, collapsible
 
@@ -1617,7 +1603,7 @@ modified_df$Label <- factor(modified_df$Label, levels = typecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
 # # Whisker Plot of Average Resident Note Time by Note Type & PGY
-g4 <- ggplot(modified_df, aes(x = Label, y = Real_Mean2, group = pgy2_split, color = pgy2_split)) +
+g4 <- ggplot(modified_df, aes(x = Label, y = Real_Mean2, group = pgy2_split, color = pgy2_split, shape = pgy2_split)) +
   geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
                 position = position_dodge(width = 0.5), width = 0.1) +
@@ -1627,15 +1613,15 @@ g4 <- ggplot(modified_df, aes(x = Label, y = Real_Mean2, group = pgy2_split, col
   labs(title = "C: Note Type & Resident Class",
        x = "Note Type (Count)",
        y = "Average Time (min)",
-       color = "Resident Class") +
+       color = "Resident Class",
+       shape = "Resident Class") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for better readability
         axis.title.y = element_text(angle = 90, vjust = 0.5, margin = margin(r = 20, unit = "pt"))) +  # Rotate y-axis label to vertical and add space
   ylim(0, 62)  # Dynamically set y-axis limit to accommodate text
 
-
 print(g4)
-ggsave("figure4.png", plot = g4, width = 10, height = 6)
+ggsave("figure4.png", plot = g4, width = 10, height = 6, dpi = 600)
 
 ```
 
@@ -1650,7 +1636,8 @@ combined_plot <- g3 / g2 / g4 +
 # Print the combined plot
 print(combined_plot)
 
-ggsave("whiskers.png", plot = combined_plot, width = 10, height = 18)
+ggsave("whiskers.tiff", plot = combined_plot, width = 10, height = 18, dpi = 600, device = "tiff")
+
 
 ```
 
@@ -1755,6 +1742,10 @@ writeLines(low_total_rows, "other.rows.txt")
 resident_counts <- resident.names %>%
   summarise(across(everything(), ~ sum(!is.na(.))))
 
+cons.data <- readRDS("cons_data.rds")
+z = sum_df(cons.data)
+
+
 # Summary statement
 print(
     results <- c(
@@ -1782,21 +1773,48 @@ print(
 ```
 
 
-<<<<<<< HEAD
-=======
 
 ```{r, counting resident note days}
->>>>>>> parent of 7ea11fd (Update residency.notes.script.Rmd)
 
-```{r}
+all.data <- readRDS("all_data.rds")
 
+pgy1 <- all.data %>%
+  filter(pgy %in% c("pgy1.21.22", "pgy1.22.23", "pgy1.23.24"))
 
+pgy2 <- all.data %>%
+  filter(pgy %in% c("pgy2.21.22", "pgy2.22.23", "pgy2.23.24"))
 
-
-
-
-
+pgy3 <- all.data %>%
+  filter(pgy %in% c("pgy3.21.22", "pgy3.22.23", "pgy3.23.24"))
   
+list.residents.1 <- split(pgy1, pgy1$author)
+list.residents.2 <- split(pgy2, pgy2$author)
+list.residents.3 <- split(pgy3, pgy3$author)
 
-````
+# Function to count unique days, considering day and night shifts (a day is between 0700 of a given day and 0700 the next day)
+note_days <- function(df) {
+  # Create a shift indicator based on the time
+  df <- df %>%
+    mutate(
+      dtofsvc_date = as.Date(dtofsvc),
+      shift = if_else(hour(dtofsvc) >= 7 & hour(dtofsvc) < 18, "Day", "Night"),
+      # Adjust date for night shift; if it starts before midnight, it's part of the next day
+      dtofsvc_date_adjusted = if_else(shift == "Night" & hour(dtofsvc) < 6, dtofsvc_date - days(1), dtofsvc_date)
+    ) %>%
+    summarize(count = n_distinct(dtofsvc_date_adjusted),
+              time.in.days = sum(`edittime(seconds)`/60/60/24))
+  
+  # Return a tibble with the counts
+  tibble(df)
+}
+
+# Apply this function to each dataframe in a list
+list_shift_counts.1 <- lapply(list.residents.1, note_days)
+list_shift_counts.2 <- lapply(list.residents.2, note_days)
+list_shift_counts.3 <- lapply(list.residents.3, note_days)
+
+# Optionally, combine all results into one dataframe with names if the list has names
+combined_results <- bind_rows(list_shift_counts.1, list_shift_counts.2, list_shift_counts.3, .id = "ResidentID")
+
+```
 
