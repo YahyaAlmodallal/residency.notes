@@ -1782,6 +1782,11 @@ print(
 ```
 
 
+<<<<<<< HEAD
+=======
+
+```{r, counting resident note days}
+>>>>>>> parent of 7ea11fd (Update residency.notes.script.Rmd)
 
 ```{r}
 
