@@ -1332,7 +1332,7 @@ g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
 
 print(g2)
 
-ggsave("figure2.tiff", plot = g2, width = 10, height = 6, dpi = 600, device = "tiff")
+ggsave("figure2.png", plot = g2, width = 10, height = 6, dpi = 600, device = "png")
 
 ### NOW MAKE GRAPHS (WHISKER PLOTS) FOR EACH GROUP OF DATA: note type, authors service, PGY, CCAs, collapsible
 
@@ -1458,7 +1458,7 @@ g3 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color =
 
 print(g3)
 
-ggsave("figure3.tiff", plot = g3, width = 10, height = 5, dpi = 600, device = "tiff")
+ggsave("figure3.png", plot = g3, width = 10, height = 5, dpi = 600, device = "png")
 
 ### NOW MAKE GRAPHS (WHISKER PLOTS) FOR EACH GROUP OF DATA: note type, authors service, PGY, CCAs, collapsible
 
@@ -1636,7 +1636,7 @@ combined_plot <- g3 / g2 / g4 +
 # Print the combined plot
 print(combined_plot)
 
-ggsave("whiskers.tiff", plot = combined_plot, width = 10, height = 18, dpi = 600, device = "tiff")
+ggsave("whiskers.png", plot = combined_plot, width = 10, height = 18, dpi = 600, device = "png")
 
 
 ```
