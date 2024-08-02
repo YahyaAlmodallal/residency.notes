@@ -1840,7 +1840,6 @@ print(
 ```
 
 
-
 ```{r, counting resident note days}
 
 all.data <- readRDS("all_data.rds")
