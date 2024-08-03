@@ -1196,7 +1196,11 @@ plot_author <- ggplot(all_authors, aes(x = block_start_dates, y = time, color = 
        x = "Block",
        y = "Total Time (hours)",
        color = "Note Type") +
-  theme_minimal()
+  theme_minimal() + 
+  scale_x_date(breaks = as.Date(c("2021-07-01", "2021-10-01", "2022-01-01", "2022-04-01", "2022-07-01", "2022-10-01", "2023-01-01", "2023-04-01", "2023-07-01", "2023-10-01", "2024-01-01", "2024-04-01")), 
+               labels = c("Jul 2021", "Oct 2021", "Jan 2022", "Apr 2022", "Jul 2022", "Oct 2022", "Jan 2023", "Apr 2023", "Jul 2023", "Oct 2023", "Jan 2024", "Apr 2024")) + 
+  theme(axis.text.x = element_text(angle = 60, vjust = 0.5, hjust = 1),
+        axis.title.x = element_text(margin = margin(t = 20)))
 print(plot_author)
 
 ggsave("plot_author.png", plot = plot_author, width = 10, height = 6, dpi = 600, device = "png")
@@ -1232,7 +1236,11 @@ plot_pgys <- ggplot(all_pgys, aes(x = block_start_dates, y = time, color = type)
        x = "Block",
        y = "Total Time (days)",
        color = "Year") +
-  theme_minimal()
+  theme_minimal() + 
+  scale_x_date(breaks = as.Date(c("2021-07-01", "2021-10-01", "2022-01-01", "2022-04-01", "2022-07-01", "2022-10-01", "2023-01-01", "2023-04-01", "2023-07-01", "2023-10-01", "2024-01-01", "2024-04-01")), 
+               labels = c("Jul 2021", "Oct 2021", "Jan 2022", "Apr 2022", "Jul 2022", "Oct 2022", "Jan 2023", "Apr 2023", "Jul 2023", "Oct 2023", "Jan 2024", "Apr 2024")) + 
+  theme(axis.text.x = element_text(angle = 60, vjust = 0.5, hjust = 1),
+        axis.title.x = element_text(margin = margin(t = 20)))
 print(plot_pgys)
 
 ggsave("plot_pgys.png", plot = plot_pgys, width = 10, height = 6, dpi = 600, device = "png")
@@ -1250,7 +1258,11 @@ plot_type <- ggplot(all_types, aes(x = block_start_dates, y = time, color = type
        x = "Block",
        y = "Average Time (minutes)",
        color = "Note Type") +
-  theme_minimal()
+  theme_minimal() + 
+  scale_x_date(breaks = as.Date(c("2021-07-01", "2021-10-01", "2022-01-01", "2022-04-01", "2022-07-01", "2022-10-01", "2023-01-01", "2023-04-01", "2023-07-01", "2023-10-01", "2024-01-01", "2024-04-01")), 
+               labels = c("Jul 2021", "Oct 2021", "Jan 2022", "Apr 2022", "Jul 2022", "Oct 2022", "Jan 2023", "Apr 2023", "Jul 2023", "Oct 2023", "Jan 2024", "Apr 2024")) + 
+  theme(axis.text.x = element_text(angle = 60, vjust = 0.5, hjust = 1),
+        axis.title.x = element_text(margin = margin(t = 20)))
 print(plot_type)
 
 ggsave("plot_type.png", plot = plot_type, width = 10, height = 6, dpi = 600, device = "png")
@@ -1268,7 +1280,11 @@ plot_services <- ggplot(all_services, aes(x = block_start_dates, y = number, col
        x = "Block",
        y = "Total Notes",
        color = "Service") +
-  theme_minimal()
+  theme_minimal() + 
+  scale_x_date(breaks = as.Date(c("2021-07-01", "2021-10-01", "2022-01-01", "2022-04-01", "2022-07-01", "2022-10-01", "2023-01-01", "2023-04-01", "2023-07-01", "2023-10-01", "2024-01-01", "2024-04-01")), 
+               labels = c("Jul 2021", "Oct 2021", "Jan 2022", "Apr 2022", "Jul 2022", "Oct 2022", "Jan 2023", "Apr 2023", "Jul 2023", "Oct 2023", "Jan 2024", "Apr 2024")) + 
+  theme(axis.text.x = element_text(angle = 60, vjust = 0.5, hjust = 1),
+        axis.title.x = element_text(margin = margin(t = 20)))
 print(plot_services)
 
 ggsave("plot_services.png", plot = plot_services, width = 10, height = 6, dpi = 600, device = "png")
@@ -1286,7 +1302,11 @@ plot_times <- ggplot(all_times, aes(x = block_start_dates, y = time, color = ser
        x = "Block",
        y = "Total Time (days)",
        color = "Time Category") +
-  theme_minimal()
+  theme_minimal() + 
+  scale_x_date(breaks = as.Date(c("2021-07-01", "2021-10-01", "2022-01-01", "2022-04-01", "2022-07-01", "2022-10-01", "2023-01-01", "2023-04-01", "2023-07-01", "2023-10-01", "2024-01-01", "2024-04-01")), 
+               labels = c("Jul 2021", "Oct 2021", "Jan 2022", "Apr 2022", "Jul 2022", "Oct 2022", "Jan 2023", "Apr 2023", "Jul 2023", "Oct 2023", "Jan 2024", "Apr 2024")) + 
+  theme(axis.text.x = element_text(angle = 60, vjust = 0.5, hjust = 1),
+        axis.title.x = element_text(margin = margin(t = 20)))
 print(plot_times)
 
 ggsave("plot_times.png", plot = plot_times, width = 10, height = 6, dpi = 600, device = "png")
