@@ -1180,38 +1180,105 @@ block_data <- do.call(rbind, lapply(split_data_list, calculate_statistics))
 # 4. Ambulatory vs ED vs Inpatient (changes in sum in days over blocks)
 # 5. pm vs after.hours vs nothing
 
-# # Create the plot with adjusted colors and theme for a black background
-# plot <- ggplot(combined_df, aes(x = Block, y = MeanEditTime, color = Group, group = Group)) +
-#   geom_line(size = 1) +  # Line for each group
-#   geom_point(size = 2) +  # Points for each group
-#   geom_text(aes(label=NoteCount), vjust=-1.5, color="white", size = 2) +  # Add note count labels
-#   labs(title = "Trend of Mean Edit Time Across Blocks", x = "Block", y = "Mean Edit Time (mins)") +
-#   scale_y_continuous(limits = c(60, 120)) +  # Set y-axis limits
-# 
-#   # Add vertical lines for PDSA cycles, arrows, and other annotations as before
-#   geom_vline(xintercept = 16, linetype="dashed", color = "#FFD700") +
-#   annotate("text", x = 16, y = 115, label = "PDSA Cycle 1", angle = 90, vjust = -0.5, color = "white") +
-#   geom_vline(xintercept = 27, linetype="dashed", color = "#FFD700") +
-#   annotate("text", x = 27, y = 115, label = "PDSA Cycle 2", angle = 90, vjust = -0.5, color = "white") +
-#   annotate("segment", x = 14, xend = 14, y = 65, yend = 60, colour = "#FF6347", size=0.5, arrow=arrow()) +
-#   annotate("text", x = 14.7, y = 66, label = "22-23", hjust = 1, color = "white") +
-#   annotate("segment", x = 27, xend = 27, y = 65, yend = 60, colour = "#FF6347", size=0.5, arrow=arrow()) +
-#   annotate("text", x = 27.8, y = 66, label = "23-24", hjust = 1, color = "white") +
-# 
-#   theme_minimal(base_family = "CMU Serif") + 
-#   theme(
-#     text = element_text(color = "white"),
-#     plot.background = element_rect(fill = "black"),
-#     panel.background = element_rect(fill = "black"),
-#     panel.grid.major = element_line(color = "#666666"),
-#     panel.grid.minor = element_line(color = "#666666"),
-#     plot.title = element_text(margin = margin(b = 20)),
-#     axis.title.x = element_text(margin = margin(t = 10)),
-#     axis.title.y = element_text(margin = margin(r = 10))
-#   )
-# 
-# # Save the plot
-# ggsave("MeanEditTimeTrend.Combined.png", plot, width = 14, height = 8, dpi = 300, bg = "black")
+# 1: total time vs resident time vs attending time (changes in sum in days over blocks)
+total_staff <- unlist(lapply(split_data_list, function(df) sum(df$staff.time, na.rm = TRUE) / (60*60)))
+total_res <- unlist(lapply(split_data_list, function(df) sum(df$resident.time, na.rm = TRUE) / (60*60))) 
+total_all <- unlist(lapply(split_data_list, function(df) sum(df$total.time, na.rm = TRUE) / (60*60)))
+
+y1 <- data.frame(block_start_dates, time = total_test, author= "Total")
+y2 <- data.frame(block_start_dates, time = total_res, author= "Resident")
+y3 <- data.frame(block_start_dates, time = total_staff, author= "Staff")
+all_authors <- rbind(y1, y2, y3)
+
+plot_author <- ggplot(all_authors, aes(x = block_start_dates, y = time, color = author)) +
+  geom_line() +
+  labs(title = "Monthly Trend of Total Time by Author",
+       x = "Block",
+       y = "Total Time (hours)",
+       color = "Note Type") +
+  theme_minimal()
+print(plot_author)
+
+
+# 2. PGY 1 vs 2 vs 3 (changes in sum in days over blocks)
+filtered_pgy1 <- lapply(split_data_list, function(df) {
+  pgy_block <- df %>%
+    filter(pgy %in% c("pgy1.21.22", "pgy1.22.23", "pgy1.23.24"))
+}) 
+total_pgy1 <- do.call(rbind, lapply(filtered_pgy1, calculate_statistics))
+
+filtered_pgy2 <- lapply(split_data_list, function(df) {
+  pgy_block <- df %>%
+    filter(pgy %in% c("pgy2.21.22", "pgy2.22.23", "pgy2.23.24"))
+})
+total_pgy2 <- do.call(rbind, lapply(filtered_pgy2, calculate_statistics))
+
+filtered_pgy3 <- lapply(split_data_list, function(df) {
+  pgy_block <- df %>%
+    filter(pgy %in% c("pgy3.21.22", "pgy3.22.23", "pgy3.23.24"))
+})
+total_pgy3 <- do.call(rbind, lapply(filtered_pgy3, calculate_statistics))
+
+y1 <- data.frame(block_start_dates, time=total_pgy1$TotalTimeDays, type="PGY-1")
+y2 <- data.frame(block_start_dates, time=total_pgy2$TotalTimeDays, type="PGY-2")
+y3 <- data.frame(block_start_dates, time=total_pgy3$TotalTimeDays, type="PGY-3")
+all_pgys <- rbind(y1, y2, y3)
+
+plot_pgys <- ggplot(all_pgys, aes(x = block_start_dates, y = time, color = type)) +
+  geom_line() +
+  labs(title = "Monthly Trend of Total Note Time by PGY",
+       x = "Block",
+       y = "Total Time (days)",
+       color = "Year") +
+  theme_minimal()
+print(plot_pgys)
+
+
+# 3. HP vs Clinic note vs DS vs consult notes
+y1 <- data.frame(block_start_dates, time=block_data$HP, type="H&P")
+y2 <- data.frame(block_start_dates, time=block_data$Clinic, type="Clinic")
+y3 <- data.frame(block_start_dates, time=block_data$Discharge, type="Discharge Summary")
+y4 <- data.frame(block_start_dates, time=block_data$Consult, type="Consult")
+all_types <- rbind(y1, y2, y3, y4)
+
+plot_type <- ggplot(all_types, aes(x = block_start_dates, y = time, color = type)) +
+  geom_line() +
+  labs(title = "Monthly Trend of Average Time by Note Type",
+       x = "Block",
+       y = "Average Time (minutes)",
+       color = "Note Type") +
+  theme_minimal()
+print(plot_type)
+
+# 4. Ambulatory vs ED vs Inpatient 
+y1 <- data.frame(block_start_dates, number=block_data$Ambulatory, service="Ambulatory")
+y2 <- data.frame(block_start_dates, number=block_data$EDNotes, service="ED")
+y3 <- data.frame(block_start_dates, number=block_data$Inpatient, service="Inpatient")
+all_services <- rbind(y1, y2, y3)
+
+plot_services <- ggplot(all_services, aes(x = block_start_dates, y = number, color = service)) +
+  geom_line() +
+  labs(title = "Monthly Trend of Total Notes by Service",
+       x = "Block",
+       y = "Total Notes",
+       color = "Service") +
+  theme_minimal()
+print(plot_services)
+
+# 5. pm vs after.hours
+y1 <- data.frame(block_start_dates, time=block_data$PMTimeDays, service="PM")
+y2 <- data.frame(block_start_dates, time=block_data$AfterHoursTimeDays, service="After Hours")
+y3 <- data.frame(block_start_dates, time=block_data$TotalTimeDays, service="Total Time")
+all_times <- rbind(y1, y2, y3)
+
+plot_times <- ggplot(all_times, aes(x = block_start_dates, y = time, color = service)) +
+  geom_line() +
+  labs(title = "Monthly Trend Outside of Typical Hours",
+       x = "Block",
+       y = "Total Time (days)",
+       color = "Time Category") +
+  theme_minimal()
+print(plot_times)
 
 ```
 
@@ -1823,23 +1890,17 @@ inpatient.resident <- per.resident %>%
 ambulatory.resident <- per.resident %>%
   filter (encountercontext == "Ambulatory")
 
-counts <- cons.data %>%
+days.per.type <- cons.data %>%
   group_by(notetype) %>%
   summarise(
     type.time = sum(resident.time)/60/60/24,
-    weekend = sum(weekend, na.rm = TRUE)/60/60/24,
-    after.hours = sum(after.hours, na.rm = TRUE)/60/60/24,
-    pm = sum(pm, na.rm = TRUE)/60/60/24,
     .groups = "drop"
   )
 
-percent <- cons.data %>%
+percent.days.per.type <- cons.data %>%
   group_by(notetype) %>%
   summarise(
     type.time = sum(resident.time)/60/60/24/2842.8*100,
-    weekend = sum(weekend, na.rm = TRUE)/60/60/24/429.680185185185*100,
-    after.hours = sum(after.hours, na.rm = TRUE)/60/60/24/657.145706018519*100,
-    pm = sum(pm, na.rm = TRUE)/60/60/24/941.186527777778*100,
     .groups = "drop"
   )
 
@@ -1870,10 +1931,7 @@ print(
 
     paste("Resident Time (days) spent on documentation for inpatient notes, and for ambulatory notes, respectively:", sum(inpatient.resident$resident.time, na.rm = TRUE)/60/60/24, sum(ambulatory.resident$resident.time, na.rm = TRUE)/60/60/24),
     
-    paste("Percentage of notes to which residents contributed >90%, >50%, and <10% of the time, respectively, is:", nrow(cons.data %>% filter(resident.percent >=90)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent >=50)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent <10)) / nrow(cons.data) * 100),
-    
-    paste("Number of days residents spent on each note type:")
-    
+    paste("Percentage of notes to which residents contributed >90%, >50%, and <10% of the time, respectively, is:", nrow(cons.data %>% filter(resident.percent >=90)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent >=50)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent <10)) / nrow(cons.data) * 100)
   )
 )
 
