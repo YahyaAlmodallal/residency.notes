@@ -1823,7 +1823,7 @@ inpatient.resident <- per.resident %>%
 ambulatory.resident <- per.resident %>%
   filter (encountercontext == "Ambulatory")
 
-counts <- per.resident %>%
+counts <- cons.data %>%
   group_by(notetype) %>%
   summarise(
     type.time = sum(resident.time)/60/60/24,
@@ -1833,27 +1833,15 @@ counts <- per.resident %>%
     .groups = "drop"
   )
 
-percent <- per.resident %>%
+percent <- cons.data %>%
   group_by(notetype) %>%
   summarise(
-    type.time = sum(resident.time)/60/60/24,
-    weekend = sum(weekend, na.rm = TRUE)/60/60/24,
-    after.hours = sum(after.hours, na.rm = TRUE)/60/60/24,
-    pm = sum(pm, na.rm = TRUE)/60/60/24,
+    type.time = sum(resident.time)/60/60/24/2842.8*100,
+    weekend = sum(weekend, na.rm = TRUE)/60/60/24/429.680185185185*100,
+    after.hours = sum(after.hours, na.rm = TRUE)/60/60/24/657.145706018519*100,
+    pm = sum(pm, na.rm = TRUE)/60/60/24/941.186527777778*100,
     .groups = "drop"
   )
-
-  per.resident <- filtered_data %>%
-    filter(pgy != "NA") %>%
-    group_by(noteid, author) %>%
-    summarise(
-      resident.time = sum(`edittime(seconds)`),
-      weekend = sum(weekend, na.rm = TRUE),
-      after.hours = sum(after.hours, na.rm = TRUE),
-      pm = sum(pm, na.rm = TRUE),
-      across(everything(), first),
-      .groups = "drop"
-    )
 
 # Summary statement
 print(
@@ -1884,7 +1872,7 @@ print(
     
     paste("Percentage of notes to which residents contributed >90%, >50%, and <10% of the time, respectively, is:", nrow(cons.data %>% filter(resident.percent >=90)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent >=50)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent <10)) / nrow(cons.data) * 100),
     
-    paste("Number of days residents spent on each note type:", )
+    paste("Number of days residents spent on each note type:")
     
   )
 )
