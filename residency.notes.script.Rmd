@@ -1185,7 +1185,7 @@ total_staff <- unlist(lapply(split_data_list, function(df) sum(df$staff.time, na
 total_res <- unlist(lapply(split_data_list, function(df) sum(df$resident.time, na.rm = TRUE) / (60*60))) 
 total_all <- unlist(lapply(split_data_list, function(df) sum(df$total.time, na.rm = TRUE) / (60*60)))
 
-y1 <- data.frame(block_start_dates, time = total_test, author= "Total")
+y1 <- data.frame(block_start_dates, time = total_all, author= "Total")
 y2 <- data.frame(block_start_dates, time = total_res, author= "Resident")
 y3 <- data.frame(block_start_dates, time = total_staff, author= "Staff")
 all_authors <- rbind(y1, y2, y3)
@@ -1198,6 +1198,8 @@ plot_author <- ggplot(all_authors, aes(x = block_start_dates, y = time, color = 
        color = "Note Type") +
   theme_minimal()
 print(plot_author)
+
+ggsave("plot_author.png", plot = plot_author, width = 10, height = 6, dpi = 600, device = "png")
 
 
 # 2. PGY 1 vs 2 vs 3 (changes in sum in days over blocks)
@@ -1233,6 +1235,7 @@ plot_pgys <- ggplot(all_pgys, aes(x = block_start_dates, y = time, color = type)
   theme_minimal()
 print(plot_pgys)
 
+ggsave("plot_pgys.png", plot = plot_pgys, width = 10, height = 6, dpi = 600, device = "png")
 
 # 3. HP vs Clinic note vs DS vs consult notes
 y1 <- data.frame(block_start_dates, time=block_data$HP, type="H&P")
@@ -1250,6 +1253,9 @@ plot_type <- ggplot(all_types, aes(x = block_start_dates, y = time, color = type
   theme_minimal()
 print(plot_type)
 
+ggsave("plot_type.png", plot = plot_type, width = 10, height = 6, dpi = 600, device = "png")
+
+
 # 4. Ambulatory vs ED vs Inpatient 
 y1 <- data.frame(block_start_dates, number=block_data$Ambulatory, service="Ambulatory")
 y2 <- data.frame(block_start_dates, number=block_data$EDNotes, service="ED")
@@ -1265,6 +1271,9 @@ plot_services <- ggplot(all_services, aes(x = block_start_dates, y = number, col
   theme_minimal()
 print(plot_services)
 
+ggsave("plot_services.png", plot = plot_services, width = 10, height = 6, dpi = 600, device = "png")
+
+
 # 5. pm vs after.hours
 y1 <- data.frame(block_start_dates, time=block_data$PMTimeDays, service="PM")
 y2 <- data.frame(block_start_dates, time=block_data$AfterHoursTimeDays, service="After Hours")
@@ -1279,6 +1288,9 @@ plot_times <- ggplot(all_times, aes(x = block_start_dates, y = time, color = ser
        color = "Time Category") +
   theme_minimal()
 print(plot_times)
+
+ggsave("plot_times.png", plot = plot_times, width = 10, height = 6, dpi = 600, device = "png")
+
 
 ```
 
@@ -1904,6 +1916,79 @@ percent.days.per.type <- cons.data %>%
     .groups = "drop"
   )
 
+pgy1 <- per.resident %>%
+  filter(pgy %in% c("pgy1.21.22", "pgy1.22.23", "pgy1.23.24")) %>%
+  group_by(noteid) %>%
+  summarise(
+    resident.time = sum(resident.time),
+    weekend = sum(weekend, na.rm = TRUE),
+    after.hours = sum(after.hours, na.rm = TRUE),
+    pm = sum(pm, na.rm = TRUE),
+    across(everything(), first),
+    .groups = "drop"
+  )
+
+pgy2 <- per.resident %>%
+  filter(pgy %in% c("pgy2.21.22", "pgy2.22.23", "pgy2.23.24")) %>%
+  group_by(noteid) %>%
+  summarise(
+    resident.time = sum(resident.time),
+    weekend = sum(weekend, na.rm = TRUE),
+    after.hours = sum(after.hours, na.rm = TRUE),
+    pm = sum(pm, na.rm = TRUE),
+    across(everything(), first),
+    .groups = "drop"
+  )
+
+pgy3 <- per.resident %>%
+  filter(pgy %in% c("pgy3.21.22", "pgy3.22.23", "pgy3.23.24")) %>%
+  group_by(noteid) %>%
+  summarise(
+    resident.time = sum(resident.time),
+    weekend = sum(weekend, na.rm = TRUE),
+    after.hours = sum(after.hours, na.rm = TRUE),
+    pm = sum(pm, na.rm = TRUE),
+    across(everything(), first),
+    .groups = "drop"
+  )
+
+# Create a combined dataframe with log-transformed 'resident.time'
+data_combined <- bind_rows(
+  mutate(pgy1, year = "PGY1", log_time = log(resident.time)),
+  mutate(pgy2, year = "PGY2", log_time = log(resident.time)),
+  mutate(pgy3, year = "PGY3", log_time = log(resident.time))
+) %>%
+  select(year, log_time)
+
+# Perform Welch's ANOVA
+anova_results <- data_combined %>%
+  welch_anova_test(log_time ~ year)
+
+# Conduct Games-Howell post-hoc test
+posthoc_results <- data_combined %>%
+  games_howell_test(log_time ~ year)
+
+# Calculate additional statistics
+additional_stats <- data_combined %>%
+  group_by(year) %>%
+  summarise(
+    Count_Non_NA = n(),
+    Real_Mean = exp(mean(log_time, na.rm = TRUE))/60,
+    sd = exp(sd(log_time, na.rm = TRUE))/60,
+    N = sum(!is.na(log_time)),
+    sd_log = sd(log_time, na.rm = TRUE),
+    SE = exp(sd_log) / sqrt(N),
+    ci_lower = exp(mean(log_time, na.rm = TRUE) - qt(0.975, df = N - 1) * sd_log / sqrt(N))/60,
+    ci_upper = exp(mean(log_time, na.rm = TRUE) + qt(0.975, df = N - 1) * sd_log / sqrt(N))/60,
+    .groups = 'drop'
+  )
+
+# Merge the posthoc results with the additional statistics
+final_results <- left_join(posthoc_results, additional_stats, by = "year")
+
+# Display the final results
+final_results
+
 # Summary statement
 print(
     results <- c(
@@ -1931,11 +2016,22 @@ print(
 
     paste("Resident Time (days) spent on documentation for inpatient notes, and for ambulatory notes, respectively:", sum(inpatient.resident$resident.time, na.rm = TRUE)/60/60/24, sum(ambulatory.resident$resident.time, na.rm = TRUE)/60/60/24),
     
-    paste("Percentage of notes to which residents contributed >90%, >50%, and <10% of the time, respectively, is:", nrow(cons.data %>% filter(resident.percent >=90)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent >=50)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent <10)) / nrow(cons.data) * 100)
+    paste("Percentage of notes to which residents contributed >90%, >50%, and <10% of the time, respectively, is:", nrow(cons.data %>% filter(resident.percent >=90)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent >=50)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent <10)) / nrow(cons.data) * 100),
+    
+    paste("PGY-1, PGY-2, PGY-3: percent of all notes is", nrow(pgy1)/156898*100, nrow(pgy2)/156898*100, nrow(pgy3)/156898*100),
+    
+    paste("PGY-1, PGY-2, PGY-3: percent of resident days", sum(pgy1$resident.time)/60/60/24/2842.78020833333*100, sum(pgy2$resident.time)/60/60/24/2842.78020833333*100, sum(pgy3$resident.time)/60/60/24/2842.78020833333*100),
+    
+    paste("PGY-1, PGY-2, PGY-3: percent of resident pm days", sum(pgy1$pm)/60/60/24/941.186527777778*100, sum(pgy2$pm)/60/60/24/941.186527777778*100, sum(pgy3$pm)/60/60/24/941.186527777778*100),
+    
+    paste("PGY-1, PGY-2, PGY-3: percent of resident after hours days", sum(pgy1$after.hours)/60/60/24/657.145706018519*100, sum(pgy2$after.hours)/60/60/24/657.145706018519*100, sum(pgy3$after.hours)/60/60/24/657.145706018519*100),
+    
+    paste("PGY-1, PGY-2, PGY-3: percent of resident weekend days", sum(pgy1$weekend)/60/60/24/429.680185185185*100, sum(pgy2$weekend)/60/60/24/429.680185185185*100, sum(pgy3$weekend)/60/60/24/429.680185185185*100),
+    
+    paste("mean and SD time in hours from start to stop are:", exp(mean(log(cons.data$starttostop), na.rm = TRUE))), exp(sd(log(cons.data$starttostop), na.rm = TRUE))
+    
   )
 )
-
-
 
 
 ```
