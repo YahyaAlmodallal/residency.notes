@@ -1803,12 +1803,24 @@ resident_counts <- resident.names %>%
   summarise(across(everything(), ~ sum(!is.na(.))))
 
 cons.data <- readRDS("cons_data.rds")
+per.resident <- readRDS("per.resident.rds")
 z = sum_df(cons.data)
 
 # Applying multiple transformations in a single pipeline
 cons.data <- cons.data %>%
   mutate(other.time = total.time - staff.time - resident.time)
 
+inpatient <- cons.data %>%
+  filter(encountercontext == "Inpatient")
+
+ambulatory <- cons.data %>%
+  filter (encountercontext == "Ambulatory")
+
+inpatient.resident <- per.resident %>%
+  filter(encountercontext == "Inpatient")
+
+ambulatory.resident <- per.resident %>%
+  filter (encountercontext == "Ambulatory")
 
 # Summary statement
 print(
@@ -1830,11 +1842,19 @@ print(
     paste("Time (days) spent on note documentation (days), total, residents, staff, and other, respectively:", sum(cons.data$total.time)/60/60/24, sum(cons.data$resident.time)/60/60/24, sum(cons.data$staff.time, na.rm = TRUE)/60/60/24, sum(cons.data$total.time)/60/60/24 - sum(cons.data$resident.time)/60/60/24 - sum(cons.data$staff.time, na.rm = TRUE)/60/60/24),
     
     paste("Time (days) spent on documentation in PM shift for inpatient notes, after-hours for ambulatory notes, and on a weekend day, respectively:", sum(cons.data$pm, na.rm = TRUE)/60/60/24, sum(cons.data$after.hours, na.rm = TRUE)/60/60/24, sum(cons.data$weekend, na.rm = TRUE)/60/60/24),
+
+    paste("Time (days) spent on documentation for inpatient notes, and for ambulatory notes, respectively:", sum(inpatient$total.time, na.rm = TRUE)/60/60/24, sum(ambulatory$total.time, na.rm = TRUE)/60/60/24),    
+    
+    paste("Resident Time (days) spent on documentation in PM shift for inpatient notes, after-hours for ambulatory notes, and on a weekend day, respectively:", sum(per.resident$pm, na.rm = TRUE)/60/60/24, sum(per.resident$after.hours, na.rm = TRUE)/60/60/24, sum(per.resident$weekend, na.rm = TRUE)/60/60/24),
+
+    paste("Resident Time (days) spent on documentation for inpatient notes, and for ambulatory notes, respectively:", sum(inpatient.resident$resident.time, na.rm = TRUE)/60/60/24, sum(ambulatory.resident$resident.time, na.rm = TRUE)/60/60/24),
     
     paste("Percentage of notes to which residents contributed >90%, >50%, and <10% of the time, respectively, is:", nrow(cons.data %>% filter(resident.percent >=90)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent >=50)) / nrow(cons.data) * 100, nrow(cons.data %>% filter(resident.percent <10)) / nrow(cons.data) * 100)
     
   )
 )
+
+
 
 
 ```
