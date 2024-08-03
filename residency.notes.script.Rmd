@@ -2048,10 +2048,58 @@ print(
     
     paste("PGY-1, PGY-2, PGY-3: percent of resident weekend days", sum(pgy1$weekend)/60/60/24/429.680185185185*100, sum(pgy2$weekend)/60/60/24/429.680185185185*100, sum(pgy3$weekend)/60/60/24/429.680185185185*100),
     
-    paste("mean and SD time in hours from start to stop are:", exp(mean(log(cons.data$starttostop), na.rm = TRUE))), exp(sd(log(cons.data$starttostop), na.rm = TRUE))
+    paste("mean and SD time in hours from start to stop are:", exp(mean(log(cons.data$starttostop), na.rm = TRUE))), exp(sd(log(cons.data$starttostop), na.rm = TRUE)),
     
-  )
+    paste("mean and SD number of charachters in a note:", exp(mean(log(cons.data$notesize), na.rm = TRUE))), exp(sd(log(cons.data$notesize), na.rm = TRUE)),
+
+      )
 )
+
+# Replace zeros with NA in %copied and %voice
+cons.data <- cons.data %>%
+  mutate(
+    `%copied` = na_if(`%copied`, 0),
+    `%voice` = na_if(`%voice`, 0)
+  )
+
+# Define the custom function to calculate statistics
+calculate_stats <- function(data, column) {
+  data <- data %>%
+    mutate(!!sym(column) := na_if(!!sym(column), 0))
+  
+  stats <- data %>%
+    summarise(
+      count = sum(!is.na(!!sym(column))),
+      range = diff(range(!!sym(column), na.rm = TRUE)),
+      min = min(!!sym(column), na.rm = TRUE),
+      max = max(!!sym(column), na.rm = TRUE),
+      exp_log_mean = exp(mean(log(!!sym(column)), na.rm = TRUE)),
+      exp_log_sd = exp(sd(log(!!sym(column)), na.rm = TRUE))
+    )
+  
+  message <- paste(
+    "Statistics for", column, ":",
+    "\nCount:", stats$count,
+    "\nRange:", stats$range,
+    "\nMin:", stats$min,
+    "\nMax:", stats$max,
+    "\nExp(log(mean)):", stats$exp_log_mean,
+    "\nExp(log(SD)):", stats$exp_log_sd
+  )
+  
+  return(message)
+}
+
+# Apply the function to %copied, %voice, and iteration columns
+message_copied <- calculate_stats(cons.data, "%copied")
+message_voice <- calculate_stats(cons.data, "%voice")
+message_iteration <- calculate_stats(cons.data, "iteration")
+message_sources <- calculate_stats(cons.data, "sources")
+
+print(message_copied)
+print(message_voice)
+print(message_iteration)
+print(message_sources)
 
 
 ```
