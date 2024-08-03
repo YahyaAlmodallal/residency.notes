@@ -292,7 +292,7 @@ calculate_statistics <- function(df) {
   sd_copied <- sd(df$`%copied`, na.rm = TRUE)
 
   # Specific mean times calculations with exponential and log transformation
-  mean_hp <- ifelse(any(df$notetype == "H&P"), exp(mean(log(df$resident.time[df$notetype == "H&P"] / 60), na.rm = TRUE)), NA)
+  mean_hp <- ifelse(any(df$notetype == "Admission Note"), exp(mean(log(df$resident.time[df$notetype == "Admission Note"] / 60), na.rm = TRUE)), NA)
   mean_CN <- ifelse(any(df$notetype == "Clinic Note"), exp(mean(log(df$resident.time[df$notetype == "Clinic Note"] / 60), na.rm = TRUE)), NA)
   mean_DS <- ifelse(any(df$notetype == "Discharge Summary"), exp(mean(log(df$resident.time[df$notetype == "Discharge Summary"] / 60), na.rm = TRUE)), NA)
   mean_Cs <- ifelse(any(df$notetype == "Consults"), exp(mean(log(df$resident.time[df$notetype == "Consults"] / 60), na.rm = TRUE)), NA)
@@ -510,7 +510,7 @@ all_data_1 <- all_data_1 %>%
     # Set encountercontext for specific notetypes
   mutate(encountercontext = case_when(
     notetype %in% c("Clinic Note", "Clinical Letter") ~ "Ambulatory",
-    notetype %in% c("Discharge Summary", "H&P", "Interim Progress Note", "Progress Notes") ~ "Inpatient",
+    notetype %in% c("Discharge Summary", "Admission Note", "Interim Progress Note", "Progress Notes") ~ "Inpatient",
     notetype %in% c("ED Provider Notes", "ED Notes") ~ "Emergency Department",
     notetype %in% c("Telephone Encounter") ~ "Telephone Encounter",
     TRUE ~ encountercontext
@@ -528,6 +528,7 @@ all_data_1 <- all_data_1 %>%
   )) %>%
   # Change encountercontext values of "HOV"
   mutate(encountercontext = if_else(encountercontext == "HOV", "Ambulatory", encountercontext)) %>%
+  mutate(notetype = if_else(notetype == "H&P", "Admission Note", notetype)) %>%
   # Set authorsservice for Emergency Department
   mutate(authorsservice = if_else(encountercontext == "Emergency Department", "Emergency Department", authorsservice)) %>%
   mutate(encountercontext = if_else(authorsservice == "Emergency Department", "Emergency Department", encountercontext)) %>%
@@ -1046,7 +1047,7 @@ results <- analyze_transformations(cons.data, columns)
 
 # Filter and summarize data for each note type
 plot_data <- cons.data %>%
-  filter(notetype %in% c("Clinic Note", "H&P", "Progress Note", "Discharge Summary")) %>%
+  filter(notetype %in% c("Clinic Note", "Admission Note", "Progress Note", "Discharge Summary")) %>%
   group_by(month = floor_date(dtofsvc, "month"), notetype) %>%
   summarise(mean_time = mean(total.time), .groups = 'drop')
 
@@ -1064,7 +1065,7 @@ ggsave("plot_dtofsvc.png", plot = plot_dtofsvc, width = 10, height = 6, dpi = 30
 
 # Adjust data filtering and summarization for filetime
 plot_data_filetime <- cons.data %>%
-  filter(notetype %in% c("Clinic Note", "H&P", "Progress Note", "Discharge Summary")) %>%
+  filter(notetype %in% c("Clinic Note", "Admission Note", "Progress Note", "Discharge Summary")) %>%
   group_by(month = floor_date(filetime, "month"), notetype) %>%
   summarise(mean_time = mean(total.time), .groups = 'drop')
 
@@ -1300,7 +1301,7 @@ typecounts <- typecounts[order(-typecounts$Counts), ]
 typecounts <- head(typecounts, 10)
 
 # Extract the NoteType column to create a character vector of allowed note types (highest 10 in frequency, excluding flowsheet notes)
-allowed_notetypes <- c("Progress Notes", "Clinic Note", "Discharge Summary", "H&P", "Emergency Department", "Procedures", "Telephone Encounter", "Event", "Consults")
+allowed_notetypes <- c("Progress Notes", "Clinic Note", "Discharge Summary", "Admission Note", "Emergency Department", "Procedures", "Telephone Encounter", "Event", "Consults")
 
 # Define the list of combinations to analyze
 combinations <- list(
@@ -1366,14 +1367,14 @@ typecounts$Label <- paste(typecounts$NoteType, " (", typecounts$Counts, ")", sep
 typecounts <- typecounts[order(-typecounts$Counts), ]
 
 # Merge this label with the result_df dataframe based on NoteType
-result_df <- merge(result_df, typecounts, by.x="group2", by.y="NoteType")
+result_df_2 <- merge(result_df, typecounts, by.x="group2", by.y="NoteType")
 
 # Set the factor levels for 'Label' in 'result_df' based on the order in 'typecounts'
-result_df$Label <- factor(result_df$Label, levels = typecounts$Label)
+result_df_2$Label <- factor(result_df$Label, levels = typecounts$Label)
 
 # Update the plotting code to use the new labels with ordered levels
 # # Whisker Plot of Average Note Time by Author's Type & Note Type
-g2 <- ggplot(result_df, aes(x = Label, y = Real_Mean2, group = variable, color = variable, shape = variable)) +
+g2 <- ggplot(result_df_2, aes(x = Label, y = Real_Mean2, group = variable, color = variable, shape = variable)) +
   geom_point(position = position_dodge(width = 0.5)) +  # Position dodge to separate the points
   geom_errorbar(aes(ymin = CI_Real_Mean2_Lower, ymax = CI_Real_Mean2_Upper), 
                 position = position_dodge(width = 0.5), width = 0.1) +
@@ -1603,7 +1604,7 @@ post_hoc_results <- per.resident %>%
   distinct
 
 # Assuming allowed_notetypes is already defined as you mentioned
-allowed_notetypes <- c("Progress Notes", "Clinic Note", "Discharge Summary", "H&P", "Emergency Department", "Procedures", "Telephone Encounter", "Event", "Consults")
+allowed_notetypes <- c("Progress Notes", "Clinic Note", "Discharge Summary", "Admission Note", "Emergency Department", "Procedures", "Telephone Encounter", "Event", "Consults")
   
 post_hoc_results <- combined_results %>%
   separate(group2, into = c("notetype2_split", "pgy2_split"), sep = "\\.", extra = "merge") %>%
@@ -1689,7 +1690,7 @@ ggsave("figure4.png", plot = g4, width = 10, height = 6, dpi = 600)
 ```{r, mergeing the 3 whiskers}
 
 # Assuming g2, g3, and g4 are your ggplot objects
-combined_plot <- g3 / g2 / g4 + 
+combined_plot <- g2 / g3 / g4 + 
   plot_annotation(title = "Whisker Plots of Average Note Time, 95% CI and Count",
                   theme = theme(plot.title = element_text(hjust = 0.5))) # Center the title
 
